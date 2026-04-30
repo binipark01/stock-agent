@@ -2,35 +2,61 @@
 __pycache__/
 *.py[cod]
 *.pyo
-*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
 .venv/
 venv/
+env/
 
 # Node
 node_modules/
 
-# Env / secrets
+# Local secrets / runtime config
 .env
+*.env
 .env.*
+!*.env.example
 !.env.example
+*.local
 
-# Logs / runtime
+# Logs / runtime state
 logs/
 *.log
+*.pid
+*.out
+*.err
 
-# Data / caches
-data/cache/
+# Local databases / caches
+**/data/*.db
+*.sqlite
+*.sqlite3
 .cache/
+
+# Temporary files
+*.tmp
+.tmp_*
+.DS_Store
+Thumbs.db
 
 # IDE / OS
 .vscode/
 .idea/
-.DS_Store
-Thumbs.db
 
 # Test / build
-.pytest_cache/
+coverage/
 dist/
 build/
-coverage/
-.coverage
+
+# Downloaded/local binaries and installers
+apps/
+installers/
+stock-research-agent/tools/cloudflared
+stock-research-agent/tools/bootstrap/get-pip.py
+
+# Hermes local plans/cache
+.hermes/

@@ -1,0 +1,15 @@
+agent_name: stock-research-agent
+runtime: python
+entrypoint: src/main.py
+language: ko
+model: null
+features:
+  market_briefing: true
+  portfolio_guard: true
+  risk_summary: true
+  social_signal_planning: true
+  us_stocks_primary: true
+paths:
+  prompts: prompts
+  data: data
+  logs: logs

@@ -1,0 +1,615 @@
+{
+  "version": 1,
+  "generated_by": "heuristic_seed_classification",
+  "accounts": [
+    {
+      "handle": "kyu.line",
+      "display_name": "Kyu Line",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "po_star.with",
+      "display_name": "포스타 | 포항공대생의 투자일지",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "doctorstrange_ss",
+      "display_name": "doctorstrange_ss",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "nassitv_official",
+      "display_name": "나민영",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "urban__potato",
+      "display_name": "도시감자",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "joo___wol2",
+      "display_name": "주월",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "angelrich_recipe",
+      "display_name": "천사부자",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "woojiiing",
+      "display_name": "우찡이",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "mooni_insight",
+      "display_name": "Mooni Insight",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "trader_jsb",
+      "display_name": "트레이더 범",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "fintwt",
+      "display_name": "Fintwit",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "panda_xbes",
+      "display_name": "panda_xbes",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "bruce_y___",
+      "display_name": "bruce",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "developmong",
+      "display_name": "15만 주식 코인 경제 유튜버 웅덩이매매법 디벨롭몽",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "day_trading911",
+      "display_name": "돌파대장",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "moneychefkr",
+      "display_name": "머니셰프 | 재테크, 재무설계, 연금관리 상담 및 금융교육 전문가",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "zzang_insight",
+      "display_name": "짱인사이트ㅣ투자, 철학, 사랑, 인생에 관한 고찰",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "vibematfia",
+      "display_name": "바이브마피아 | Vibe마피아",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "crypto_nomad_j",
+      "display_name": "크립토노마드J",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "ant_1bottle",
+      "display_name": "개미일병 / 투자 뷰 공유 / 계좌 빨간 맛",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "jwlee090",
+      "display_name": "Jwlee",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "gten_btc",
+      "display_name": "지텐 | 비트코인 투자 | 직장인 재테크",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "trader_chan_",
+      "display_name": "Chan | Trader | 전업 투자",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "talantfund",
+      "display_name": "Talant",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "investing_m94",
+      "display_name": "국내주식| 미국주식",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "k_stock99",
+      "display_name": "Kei(케이)",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "stockstoearn",
+      "display_name": "Stockstoearn",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "sola_economica",
+      "display_name": "오경-오늘의경제, 오직경제",
+      "category": "macro_news",
+      "priority": "high"
+    },
+    {
+      "handle": "us_stock_info",
+      "display_name": "미국주식가이드",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "ps4_justdoit",
+      "display_name": "플스포 김동호",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "irendebate",
+      "display_name": "Systematic Machine Ant",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "cryto_guide",
+      "display_name": "강승우",
+      "category": "macro_news",
+      "priority": "high"
+    },
+    {
+      "handle": "hyuncoin1",
+      "display_name": "현코인",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "treasure__stock",
+      "display_name": "보물주식",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "slav_insight",
+      "display_name": "슬라브 | 미국주식 · 인사이트",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "trader_pppp",
+      "display_name": "국장 미국주식 코인 trader_pppp",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "sseongmiin_02",
+      "display_name": "성민띠",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "soo_ahime",
+      "display_name": "수아",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "return.driver",
+      "display_name": "Mad Max",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "imtaeho11",
+      "display_name": "주식잘하는단테형",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "bullish_bee",
+      "display_name": "양봉업자",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "joo____wol",
+      "display_name": "주월",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "trumptruth_kr",
+      "display_name": "trumptruth_kr",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "hunte_index",
+      "display_name": "hunte_index",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "taeu6593",
+      "display_name": "이태우",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "12_6am1",
+      "display_name": "Jauy",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "jtdj_official2",
+      "display_name": "장투대장(튽)",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "god_chart",
+      "display_name": "차트의 신ㅣ6년차 풀타임 트레이더",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "insa_ngmin",
+      "display_name": "$이상민$",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "ospr2y",
+      "display_name": "물수리 트레이딩",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "king_gyul23",
+      "display_name": "왕귤의 투자노트",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "jntrdr",
+      "display_name": "JN",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "stockvest_02",
+      "display_name": "장투하는 최준규",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "nyu_trader",
+      "display_name": "뉴욕대 투자자 | 나스닥, 경제 이야기",
+      "category": "macro_news",
+      "priority": "high"
+    },
+    {
+      "handle": "wall_street_s",
+      "display_name": "월스트릿 전략가",
+      "category": "macro_news",
+      "priority": "high"
+    },
+    {
+      "handle": "bdinvestingg",
+      "display_name": "Bilaal Dhalech | Investing | Stockmarket",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "one.chun_",
+      "display_name": "천이요",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "coin_sniper1",
+      "display_name": "코인스나이퍼",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "beat.themarket",
+      "display_name": "BeatTheMarket",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "bangsukism",
+      "display_name": "Byungsuk Kim (김병석)",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "futuresnow_news",
+      "display_name": "오선의 미국 증시",
+      "category": "macro_news",
+      "priority": "high"
+    },
+    {
+      "handle": "james_lee2875",
+      "display_name": "James Lee",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "kimsajang11",
+      "display_name": "김",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "model_qqqq",
+      "display_name": "미국주식ㅣ모델Q",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "100minvestor",
+      "display_name": "1000억 투자자 (천투)",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "happy_tracer",
+      "display_name": "강민의 금일봉",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "bstory_economy",
+      "display_name": "비스토리 l 20대•30대 미국주식으로 돈버는 스토리",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "snowgyul",
+      "display_name": "임도영",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "unity_kay",
+      "display_name": "HYUNSUE KIM",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "squad__shark",
+      "display_name": "상어 매매일지",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "bullstory1",
+      "display_name": "미국주식 불스토리 (BULLSTORY)",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "jjang_news",
+      "display_name": "jjanga",
+      "category": "macro_news",
+      "priority": "high"
+    },
+    {
+      "handle": "avec_insight",
+      "display_name": "아베크｜투자인사이트",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "goog_st",
+      "display_name": "국스트",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "financedesign_official",
+      "display_name": "FIND",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "trader_coink",
+      "display_name": "Trader K",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "achiever_lee",
+      "display_name": "어치버리 | 컨텐츠의 모든것",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "dolphin_invest_",
+      "display_name": "미상",
+      "category": "stocks",
+      "priority": "high"
+    },
+    {
+      "handle": "insights_trader86",
+      "display_name": "인사이트레이더",
+      "category": "trader",
+      "priority": "high"
+    },
+    {
+      "handle": "teman12111",
+      "display_name": "teman12111",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "ddosa_neverlose",
+      "display_name": "또사이선생",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "slow__cow__",
+      "display_name": "음머음머",
+      "category": "general_investing",
+      "priority": "medium"
+    },
+    {
+      "handle": "youtubejocoding",
+      "display_name": "조코딩",
+      "category": "other",
+      "priority": "low"
+    },
+    {
+      "handle": "kimpowell_1",
+      "display_name": "비트코인 | 김파월",
+      "category": "crypto",
+      "priority": "high"
+    },
+    {
+      "handle": "cokac_com",
+      "display_name": "코드깎는노인",
+      "category": "general_investing",
+      "priority": "medium"
+    }
+  ],
+  "grouped_handles": {
+    "general_investing": [
+      "kyu.line",
+      "doctorstrange_ss",
+      "nassitv_official",
+      "urban__potato",
+      "joo___wol2",
+      "angelrich_recipe",
+      "woojiiing",
+      "mooni_insight",
+      "fintwt",
+      "panda_xbes",
+      "bruce_y___",
+      "day_trading911",
+      "moneychefkr",
+      "zzang_insight",
+      "vibematfia",
+      "ant_1bottle",
+      "jwlee090",
+      "talantfund",
+      "ps4_justdoit",
+      "irendebate",
+      "sseongmiin_02",
+      "soo_ahime",
+      "return.driver",
+      "imtaeho11",
+      "joo____wol",
+      "trumptruth_kr",
+      "hunte_index",
+      "taeu6593",
+      "12_6am1",
+      "jtdj_official2",
+      "insa_ngmin",
+      "ospr2y",
+      "jntrdr",
+      "one.chun_",
+      "beat.themarket",
+      "bangsukism",
+      "james_lee2875",
+      "kimsajang11",
+      "happy_tracer",
+      "snowgyul",
+      "unity_kay",
+      "avec_insight",
+      "goog_st",
+      "financedesign_official",
+      "achiever_lee",
+      "teman12111",
+      "ddosa_neverlose",
+      "slow__cow__",
+      "cokac_com"
+    ],
+    "trader": [
+      "po_star.with",
+      "trader_jsb",
+      "trader_chan_",
+      "bullish_bee",
+      "god_chart",
+      "king_gyul23",
+      "squad__shark",
+      "bullstory1",
+      "insights_trader86"
+    ],
+    "crypto": [
+      "developmong",
+      "crypto_nomad_j",
+      "gten_btc",
+      "hyuncoin1",
+      "trader_pppp",
+      "coin_sniper1",
+      "trader_coink",
+      "kimpowell_1"
+    ],
+    "stocks": [
+      "investing_m94",
+      "k_stock99",
+      "stockstoearn",
+      "us_stock_info",
+      "treasure__stock",
+      "slav_insight",
+      "stockvest_02",
+      "bdinvestingg",
+      "model_qqqq",
+      "100minvestor",
+      "bstory_economy",
+      "dolphin_invest_"
+    ],
+    "macro_news": [
+      "sola_economica",
+      "cryto_guide",
+      "nyu_trader",
+      "wall_street_s",
+      "futuresnow_news",
+      "jjang_news"
+    ],
+    "other": [
+      "youtubejocoding"
+    ]
+  }
+}
