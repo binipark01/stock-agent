@@ -49,6 +49,90 @@ WSL에서 Python 환경이 externally managed라면:
 python3 -m pip install --user --break-system-packages -r requirements.txt
 ```
 
+## Use from another computer or Hermes / 다른 컴퓨터·Hermes에서 사용
+
+Clone this repository on the target computer and enter the agent folder:
+
+대상 컴퓨터에서 저장소를 clone한 뒤 에이전트 폴더로 들어갑니다:
+
+```bash
+mkdir -p ~/Agents
+cd ~/Agents
+git clone https://github.com/binipark01/stock-agent.git
+cd stock-agent/stock-research-agent
+python3 -m pip install --user -r requirements.txt
+python3 src/main.py --mode brief "오늘 뭐 봐야 해?"
+```
+
+WSL with D: drive:
+
+D 드라이브를 쓰는 WSL:
+
+```bash
+mkdir -p /mnt/d/Agents
+cd /mnt/d/Agents
+git clone https://github.com/binipark01/stock-agent.git
+cd stock-agent/stock-research-agent
+python3 -m pip install --user -r requirements.txt
+python3 src/main.py --mode sector_strength "장중 섹터별 강한 섹터 약한 섹터 알려줘"
+```
+
+Windows PowerShell:
+
+```powershell
+cd D:\Agents
+git clone https://github.com/binipark01/stock-agent.git
+cd stock-agent\stock-research-agent
+python -m pip install -r requirements.txt
+python src\main.py --mode technical_snapshot "NVDA 차트 기술적 스냅샷 보여줘"
+```
+
+To make another Hermes use this agent, tell it once:
+
+다른 Hermes가 이 에이전트를 쓰게 하려면 한 번 이렇게 알려주면 됩니다:
+
+```text
+Use the local stock-research-agent for stock requests.
+Preferred paths:
+- WSL: /mnt/d/Agents/stock-agent/stock-research-agent
+- Linux/macOS fallback: ~/Agents/stock-agent/stock-research-agent
+- Windows: D:\Agents\stock-agent\stock-research-agent
+Commands:
+- Brief: python3 src/main.py --mode brief "<request>"
+- Sector/theme: python3 src/main.py --mode sector_strength "<request>"
+- Chart: python3 src/main.py --mode technical_snapshot "<request>"
+- Filings: python3 src/main.py --mode sec_filings "<request>"
+```
+
+```text
+앞으로 주식 요청은 로컬 stock-research-agent를 우선 사용해.
+우선 경로:
+- WSL: /mnt/d/Agents/stock-agent/stock-research-agent
+- Linux/macOS 대체: ~/Agents/stock-agent/stock-research-agent
+- Windows: D:\Agents\stock-agent\stock-research-agent
+명령:
+- 브리핑: python3 src/main.py --mode brief "<요청>"
+- 섹터/테마: python3 src/main.py --mode sector_strength "<요청>"
+- 차트: python3 src/main.py --mode technical_snapshot "<요청>"
+- 공시: python3 src/main.py --mode sec_filings "<요청>"
+```
+
+Ask that Hermes to save the rule to memory or as a skill if you want it to reuse this automatically.
+
+이 규칙을 계속 재사용하려면 해당 Hermes에게 memory 또는 skill로 저장하라고 요청하세요.
+
+Telegram/TradingView secrets are not committed. Create a local env file only on the target machine:
+
+Telegram/TradingView secret은 커밋하지 않습니다. 대상 컴퓨터에서만 로컬 env 파일을 만드세요:
+
+```bash
+cp config/tradingview_webhook.env.example config/tradingview_webhook.env
+```
+
+Then fill in local values such as webhook secret, Telegram bot token, and chat id.
+
+이후 webhook secret, Telegram bot token, chat id 같은 로컬 값을 채웁니다.
+
 ## Example commands / 실행 예시
 
 ```bash
