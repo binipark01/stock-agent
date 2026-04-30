@@ -19,7 +19,7 @@ try:
         insert_news_item,
         insert_price_snapshot,
     )
-    from .market_data import fetch_earnings_event, fetch_price_history, fetch_price_snapshot, fetch_symbol_news
+    from .market_data import fetch_earnings_event, fetch_price_snapshot, fetch_symbol_news
     from .tossinvest_data import build_toss_market_brief, map_toss_news_item, run_toss_ingest, score_toss_news_item
     from .earnings_preview import build_earnings_preview
     from .saveticker_data import build_saveticker_brief, build_saveticker_important_breaking, map_saveticker_item, run_saveticker_ingest, score_saveticker_item
@@ -28,6 +28,8 @@ try:
     from .sec_filings import build_sec_focus_lines, fetch_sec_filings_pack
     from .topic_hub import build_topic_hub_focus_lines
     from .sector_strength import build_sector_strength_report, fetch_sector_strength_quotes
+    from .request_modes import infer_mode
+    from .technical_snapshot import build_technical_snapshot
 except ImportError:  # direct script execution
     from repository import (
         fetch_latest_earnings,
@@ -42,7 +44,7 @@ except ImportError:  # direct script execution
         insert_news_item,
         insert_price_snapshot,
     )
-    from market_data import fetch_earnings_event, fetch_price_history, fetch_price_snapshot, fetch_symbol_news
+    from market_data import fetch_earnings_event, fetch_price_snapshot, fetch_symbol_news
     from tossinvest_data import build_toss_market_brief, map_toss_news_item, run_toss_ingest, score_toss_news_item
     from earnings_preview import build_earnings_preview
     from saveticker_data import build_saveticker_brief, build_saveticker_important_breaking, map_saveticker_item, run_saveticker_ingest, score_saveticker_item
@@ -51,6 +53,8 @@ except ImportError:  # direct script execution
     from sec_filings import build_sec_focus_lines, fetch_sec_filings_pack
     from topic_hub import build_topic_hub_focus_lines
     from sector_strength import build_sector_strength_report, fetch_sector_strength_quotes
+    from request_modes import infer_mode
+    from technical_snapshot import build_technical_snapshot
 
 
 DEFAULT_SYMBOLS = ["NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AMD"]
@@ -87,50 +91,6 @@ def parse_request_payload(raw_request: str) -> dict[str, Any]:
             pass
     return {"request": text}
 
-
-def infer_mode(request: str, explicit_mode: str | None = None) -> str:
-    if explicit_mode:
-        return explicit_mode
-    lowered = request.lower()
-    if any(keyword in lowered for keyword in ["topic", "topics", "list topics", "peek topic", "데이터허브", "datahub", "data hub"]):
-        return "topic_hub"
-    if any(keyword in lowered for keyword in ["sector strength", "sector_strength", "섹터 강약", "섹터별", "강한 섹터", "약한 섹터", "장중 섹터", "시장 레짐", "market regime"]):
-        return "sector_strength"
-    if any(keyword in lowered for keyword in ["yfinance", "yf pack", "yf팩", "야후팩"]):
-        return "yfinance_pack"
-    if any(keyword in lowered for keyword in ["sec", "edgar", "공시", "filing", "filings", "8-k", "10-q", "10-k", "s-3"]):
-        return "sec_filings"
-    if any(keyword in lowered for keyword in ["수집", "ingest", "sync"]):
-        return "ingest"
-    if any(keyword in lowered for keyword in ["세이브티커", "saveticker", "save"]):
-        if any(keyword in lowered for keyword in ["중요", "속보", "딱딱", "alert", "breaking"]):
-            return "saveticker_breaking"
-        return "saveticker_sync"
-    if any(keyword in lowered for keyword in ["토스", "toss", "지수 뉴스", "tossinvest"]):
-        return "toss_sync"
-    if any(keyword in lowered for keyword in ["실적 프리뷰", "earnings preview", "preview pack", "프리뷰"]):
-        return "earnings_preview"
-    if any(keyword in lowered for keyword in ["실적", "earnings", "어닝"]):
-        return "earnings"
-    if any(keyword in lowered for keyword in ["threads", "스레드", "팔로잉", "social"]):
-        return "social_search"
-    if any(keyword in lowered for keyword in ["왜", "why ", "봐야 해", "체크해야 해"]):
-        return "why_symbol"
-    if any(keyword in lowered for keyword in ["overnight", "야간", "night recap", "overnight recap"]):
-        return "overnight_recap"
-    if any(keyword in lowered for keyword in ["뭐가 달라", "무슨 변화", "변화", "changed", "what changed"]):
-        return "what_changed"
-    if any(keyword in lowered for keyword in ["비교", " vs ", "뭐 먼저", "which first"]):
-        return "compare"
-    if any(keyword in lowered for keyword in ["차트", "기술적", "technical", "setup", "rsi", "macd"]):
-        return "technical_snapshot"
-    if any(keyword in lowered for keyword in ["브리핑", "장전", "장후", "brief"]):
-        return "brief"
-    if any(keyword in lowered for keyword in ["포트폴리오", "보유", "리스크", "guard"]):
-        return "portfolio_guard"
-    if any(keyword in lowered for keyword in ["소식", "정보", "업데이트", "알려줘"]):
-        return "brief"
-    return "symbol_review"
 
 
 def infer_symbols(request: str, provided_symbols: list[str] | None = None, watchlist_path: str | Path | None = None) -> list[str]:
@@ -300,102 +260,6 @@ def run_ingest(symbols: list[str], db_path: Path = DEFAULT_DB_PATH) -> dict[str,
         "db_path": str(db_path),
     }
 
-
-def _simple_sma(values: list[float], period: int) -> float:
-    window = values[-period:] if len(values) >= period else values
-    return round(sum(window) / len(window), 2)
-
-
-def _simple_rsi(values: list[float], period: int = 14) -> float:
-    if len(values) < 2:
-        return 50.0
-    changes = [values[idx] - values[idx - 1] for idx in range(1, len(values))]
-    window = changes[-period:] if len(changes) >= period else changes
-    gains = [change for change in window if change > 0]
-    losses = [-change for change in window if change < 0]
-    avg_gain = sum(gains) / len(window) if window else 0.0
-    avg_loss = sum(losses) / len(window) if window else 0.0
-    if avg_loss == 0:
-        return 100.0 if avg_gain > 0 else 50.0
-    rs = avg_gain / avg_loss
-    return round(100 - (100 / (1 + rs)), 2)
-
-
-def build_technical_snapshot(symbol: str) -> dict[str, Any]:
-    closes = fetch_price_history(symbol)
-    latest = round(closes[-1], 2)
-    sma20 = _simple_sma(closes, 20)
-    sma50 = _simple_sma(closes, 50)
-    sma200 = _simple_sma(closes, 200)
-    rsi14 = _simple_rsi(closes, 14)
-    ema12 = _simple_sma(closes, 12)
-    ema26 = _simple_sma(closes, 26)
-    macd = round(ema12 - ema26, 2)
-    signal = round(macd * 0.8, 2)
-    hist = round(macd - signal, 2)
-    support = round(min(closes[-20:]), 2)
-    resistance = round(max(closes[-20:]), 2)
-
-    if latest >= sma20 >= sma50:
-        trend = "상승 추세"
-    elif latest <= sma20 <= sma50:
-        trend = "하락 추세"
-    else:
-        trend = "박스권/혼조"
-
-    if rsi14 >= 70:
-        momentum = "과열 구간"
-    elif rsi14 <= 30:
-        momentum = "과매도 구간"
-    else:
-        momentum = "중립 구간"
-
-    if latest > resistance * 0.98 and hist > 0:
-        interpretation = "저항 돌파 시도 구간이라 추세 추종 관점이지만 과열 체크 필요"
-        action_bias = "손절 경계"
-        event_tags = ["저항 돌파 시도", "과열 경계"] if rsi14 >= 70 else ["저항 돌파 시도"]
-        stop_price = round(sma20, 2)
-    elif latest < support * 1.02 and rsi14 < 40:
-        interpretation = "지지 테스트 구간이라 반등 확인 전까지는 관망 우선"
-        action_bias = "관망 관점"
-        event_tags = ["지지 이탈 위험"]
-        stop_price = round(support * 0.98, 2)
-    else:
-        interpretation = "지지/저항 사이 중립 구간이라 추격보다 확인 매매가 유리"
-        action_bias = "매수 관점" if latest >= sma20 and hist >= 0 else "관망 관점"
-        if rsi14 >= 70:
-            event_tags = ["과열 경계"]
-        elif action_bias == "매수 관점":
-            event_tags = ["저항 돌파 시도"]
-        else:
-            event_tags = ["지지 이탈 위험"]
-        stop_price = round(support * 0.99, 2)
-
-    stop_distance_pct = round(((latest - stop_price) / latest) * 100, 2) if latest else 0.0
-    event_text = f" / {', '.join(event_tags)}" if event_tags else ""
-    brief_line = f"차트 한줄: {symbol} / {trend} / RSI {rsi14:.2f} / {action_bias}{event_text} / 손절 {stop_price:.2f} ({stop_distance_pct:+.2f}%)"
-
-    return {
-        "symbol": symbol,
-        "latest": latest,
-        "sma20": sma20,
-        "sma50": sma50,
-        "sma200": sma200,
-        "rsi14": rsi14,
-        "macd": macd,
-        "signal": signal,
-        "hist": hist,
-        "support": support,
-        "resistance": resistance,
-        "stop_price": stop_price,
-        "stop_distance_pct": stop_distance_pct,
-        "trend": trend,
-        "momentum": momentum,
-        "interpretation": interpretation,
-        "action_bias": action_bias,
-        "event_tags": event_tags,
-        "brief_line": brief_line,
-    }
 
 
 def _infer_brief_phase(request_text: str) -> str:
