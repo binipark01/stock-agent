@@ -1,63 +1,194 @@
-# stock-research-agent
+# stock-research-agent / 주식 리서치 에이전트
 
-해외주식, 특히 미국주식을 메인으로 두고 주식/시장/포트폴리오 관련 요청을 투자 판단 보조용으로 구조화하는 로컬 에이전트.
+> US-stock-first local research and alert agent for market briefings, sector/theme strength, filings, news, technical snapshots, and Telegram/TradingView workflows.
+>
+> 미국주식 중심의 로컬 리서치/알림 에이전트입니다. 시장 브리핑, 섹터/테마 강도, 공시, 뉴스, 기술적 스냅샷, Telegram/TradingView 연동을 지원합니다.
 
-## 현재 되는 것
-- 미국주식 메인 워치리스트 기준으로 요청 해석
-- 미국장 브리핑, 리스크 체크, 소셜/뉴스 감시 포인트 제안
-- 강세/약세/촉매/리스크 4축 요약
-- Yahoo Finance 기반 가격 저장 + seed 뉴스 저장
-- yfinance가 설치되어 있으면 가격/히스토리 fallback으로 자동 사용
-- yfinance optional pack: quote/options/fundamentals/news/calendar/holders/actions/recommendations 요약
-- SEC/EDGAR 최근 공시 요약: 8-K/10-Q/10-K/S-3 등 form 분류와 SEC filing URL 제공
-- Fincept식 DataHub-lite topic hub: quote/news/filing/options/social/earnings topic list + 캐시 peek
-- Yahoo quote page 기반 실제 미국 실적일 파싱 + fallback seed 일정 저장
-- 토스증권 공개 미국지수/미국뉴스 보조지표 저장
-- SaveTicker 속보 수집 및 티커/루머 분류
-- Earnings Preview Pack 생성
-- 실행 가능한 다음 액션 제안
+## Overview / 개요
 
-## 기본 메인 워치리스트
-기본값은 `config/watchlist.json` 에서 읽습니다.
+`stock-research-agent` turns stock-market requests into structured research payloads and concise trader-style summaries. It is built for local execution, testability, and practical decision support rather than black-box trading automation.
 
-현재 기본값:
-- NVDA
-- MSFT
-- AMZN
-- META
-- GOOGL
-- TSLA
+`stock-research-agent`는 주식/시장 관련 요청을 구조화된 리서치 결과와 실전형 요약으로 바꿔주는 로컬 실행 에이전트입니다. 자동매매 블랙박스가 아니라, 판단 보조와 검증 가능한 리서치 워크플로우를 목표로 합니다.
 
-## 실행
+## Features / 기능
+
+- US-stock watchlist briefing and symbol review.
+- 미국주식 워치리스트 브리핑 및 종목 리뷰.
+- Sector, ETF, custom theme, and sub-theme strength reports.
+- 섹터, ETF, 사용자 정의 테마, 서브테마 강도 리포트.
+- Internal rotation alerts when strong and weak sub-themes diverge.
+- 같은 상위 테마 안에서 강한 서브테마와 약한 서브테마가 갈릴 때 내부 로테이션 알림.
+- Yahoo chart/yfinance quote and history helpers.
+- Yahoo chart/yfinance 기반 현재가 및 히스토리 보조 수집.
+- Technical snapshot: trend, RSI, MACD, support/resistance, stop level, action bias.
+- 기술적 스냅샷: 추세, RSI, MACD, 지지/저항, 손절 기준, action bias.
+- SEC/EDGAR filing summaries for 8-K, 10-Q, 10-K, S-3 and related forms.
+- SEC/EDGAR 공시 요약: 8-K, 10-Q, 10-K, S-3 등.
+- TopicHub/DataHub-lite cache view for quote/news/filing/options/social/earnings topics.
+- quote/news/filing/options/social/earnings 토픽을 보는 TopicHub/DataHub-lite 캐시 뷰.
+- SaveTicker breaking-news ingestion and rumor/ticker classification.
+- SaveTicker 속보 수집 및 루머/티커 분류.
+- TossInvest public US index/news ingestion.
+- 토스증권 공개 미국지수/미국뉴스 수집.
+- TradingView webhook server and Telegram notification helpers.
+- TradingView webhook 서버 및 Telegram 알림 보조 기능.
+
+## Quick start / 빠른 시작
+
 ```bash
 cd /mnt/d/Agents/stock-research-agent
-python3 -m pip install --user --break-system-packages -r requirements.txt  # WSL user-site 설치
+python3 -m pip install --user -r requirements.txt
 python3 src/main.py "NVDA랑 TSLA 오늘 체크포인트 정리해줘"
-python3 src/main.py --mode brief "오늘 뭐 봐야 해?"   # watchlist.json 기준
-python3 src/main.py --mode saveticker_sync "SaveTicker 미국주 속보 수집"
-python3 src/main.py --mode toss_sync "토스 미국지수 뉴스 수집"
-python3 src/main.py --mode ingest "NVDA MSFT AMZN 데이터 수집"
+```
+
+If your Python environment is externally managed in WSL, use:
+
+WSL에서 Python 환경이 externally managed라면:
+
+```bash
+python3 -m pip install --user --break-system-packages -r requirements.txt
+```
+
+## Example commands / 실행 예시
+
+```bash
+# Watchlist or symbol briefing / 워치리스트 또는 종목 브리핑
+python3 src/main.py --mode brief "오늘 뭐 봐야 해?"
 python3 src/main.py --mode brief "NVDA MSFT 장전 브리핑 만들어줘"
-python3 src/main.py --mode earnings "MSFT AMZN 이번 실적 일정 보여줘"
-python3 src/main.py --mode earnings_preview "NVDA MSFT 실적 프리뷰 만들어줘"
+
+# Sector/theme strength / 섹터·테마 강도
+python3 src/main.py --mode sector_strength "장중 섹터별 강한 섹터 약한 섹터 알려줘"
+
+# Technical snapshot / 기술적 스냅샷
+python3 src/main.py --mode technical_snapshot "NVDA 차트 기술적 스냅샷 보여줘"
+
+# Data packs / 데이터 팩
 python3 src/main.py --mode yfinance_pack "NVDA yfinance 싹 가져와"
 python3 src/main.py --mode sec_filings "NVDA 최근 8-K 10-Q 공시 요약"
 python3 src/main.py --mode topic_hub "NVDA topic hub 보여줘"
-python3 src/main.py --mode brief "NVDA 브리핑 yfinance 옵션도"
+
+# Ingestion / 수집
+python3 src/main.py --mode ingest "NVDA MSFT AMZN 데이터 수집"
+python3 src/main.py --mode saveticker_sync "SaveTicker 미국주 속보 수집"
+python3 src/main.py --mode toss_sync "토스 미국지수 뉴스 수집"
+
+# JSON payload / JSON 요청
 python3 src/main.py --json '{"mode":"brief","symbols":["NVDA","MSFT","AMZN"],"portfolio":["NVDA"],"request":"미국장 브리핑 만들어줘"}'
 ```
 
-## 참고 repo 적용 메모
-- 상세 메모: `docs/REFERENCE_REPOS.md`
-- 현재 반영 완료: SEC/EDGAR mode, DataHub-lite topic hub mode
-- 다음 후보: TradingAgents식 분석위원회, PyPortfolioOpt/Riskfolio식 포트폴리오 리스크, alert backtest
-- 라이선스 주의: FinceptTerminal/OpenBB는 AGPL 계열이라 코드 복붙 금지, UX/아키텍처만 참고
+## Modes / 모드
 
-## 다음 확장 후보
-1. TradingView webhook → 텔레그램 자동 전송
-2. 실제 뉴스 API 연결
-3. Threads/소셜 시그널 고도화
-4. 포트폴리오 thesis guard 연결
-5. 토스증권 커뮤니티/스크리너까지 확장
-6. NASDAQ/NDX/US100 같은 지수 알림 전용 처리 — 보류
-7. FinceptTerminal은 통합 대상이 아니라 기능 참고용: AGPL-3.0/상용 라이선스라 코드 복붙 금지, equity research/portfolio/news UX만 참고
+| Mode | English | 한국어 |
+|---|---|---|
+| `brief` | Market/watchlist briefing | 시장/워치리스트 브리핑 |
+| `symbol_review` | Single or multi-symbol review | 단일/복수 종목 리뷰 |
+| `sector_strength` | Sector/theme strength and rotation | 섹터/테마 강도 및 로테이션 |
+| `technical_snapshot` | Technical indicator snapshot | 기술적 지표 스냅샷 |
+| `why_symbol` | Explain why a symbol matters | 종목을 봐야 하는 이유 |
+| `compare` | Compare symbols or candidates | 종목/후보 비교 |
+| `what_changed` | Recent change summary | 최근 변화 요약 |
+| `overnight_recap` | Overnight recap | 야간/장전 요약 |
+| `portfolio_guard` | Portfolio risk/thesis guard | 포트폴리오 리스크/논리 점검 |
+| `yfinance_pack` | yfinance quote/options/fundamentals/news pack | yfinance 종합 데이터 팩 |
+| `sec_filings` | SEC/EDGAR filing summary | SEC/EDGAR 공시 요약 |
+| `topic_hub` | Cached topic overview | 캐시된 토픽 개요 |
+| `earnings` | Earnings date lookup | 실적 일정 확인 |
+| `earnings_preview` | Earnings preview pack | 실적 프리뷰 팩 |
+| `saveticker_sync` | SaveTicker ingestion | SaveTicker 수집 |
+| `saveticker_breaking` | Important breaking-news summary | 중요 속보 요약 |
+| `toss_sync` | TossInvest public data ingestion | 토스증권 공개 데이터 수집 |
+| `social_search` | Threads seed-account search | Threads seed 계정 검색 |
+
+## Project structure / 프로젝트 구조
+
+```text
+stock-research-agent/
+  src/
+    main.py                  # CLI entrypoint and response orchestration
+    request_modes.py         # Request-to-mode routing
+    sector_strength.py       # Sector/theme scoring and report building
+    sector_theme_config.py   # ETF/theme/sub-theme symbol configuration
+    technical_snapshot.py    # RSI/MACD/support/resistance snapshot
+    yfinance_data.py         # Yahoo/yfinance quote and data helpers
+    market_data.py           # Price/news/earnings helpers
+    sec_filings.py           # SEC/EDGAR public filing helpers
+    topic_hub.py             # DataHub-lite topic/cache view
+    saveticker_data.py       # SaveTicker ingestion and scoring
+    tossinvest_data.py       # TossInvest public data helpers
+    tradingview_webhook.py   # TradingView alert payload handling
+    telegram_notify.py       # Telegram notification helper
+  scripts/
+    run_sector_strength_alerts.py
+    tradingview_webhook_server.py
+    start_tradingview_webhook.sh
+    stop_tradingview_webhook.sh
+  tests/
+    test_*.py
+  config/
+    watchlist.json
+    tradingview_webhook.env.example
+  docs/
+    tradingview-webhook.md
+    REFERENCE_REPOS.md
+```
+
+## Testing / 테스트
+
+```bash
+cd /mnt/d/Agents/stock-research-agent
+python3 -m py_compile src/main.py src/sector_strength.py src/yfinance_data.py scripts/run_sector_strength_alerts.py
+python3 -m unittest discover -s tests -p 'test_*.py'
+```
+
+Latest local verification:
+
+최근 로컬 검증:
+
+- `116` unit tests passed.
+- `116`개 유닛 테스트 통과.
+- Key runtime modules compiled successfully.
+- 주요 런타임 모듈 컴파일 성공.
+
+## Quote and market-data notes / 현재가·시장데이터 기준
+
+- Premarket and intraday alerts prefer Yahoo chart data with 1-minute bars where available.
+- 프리장/장중 알림은 가능한 경우 Yahoo chart 1분봉 데이터를 우선 사용합니다.
+- Regular-session percent changes should be interpreted against the prior regular close, not against a moving current price baseline.
+- 정규장 등락률은 움직이는 현재가 기준이 아니라 전일 정규장 종가 대비로 해석해야 합니다.
+- Yahoo/yfinance can rate-limit or return stale/mixed fields, so outputs should be treated as research aids and cross-checked before trading.
+- Yahoo/yfinance는 rate limit 또는 stale/mixed field 문제가 있을 수 있으므로 실제 매매 전 교차검증이 필요합니다.
+
+## TradingView and Telegram / TradingView·Telegram 연동
+
+TradingView alerts can be sent to the local webhook server and then formatted into Telegram messages.
+
+TradingView 알림은 로컬 webhook 서버로 받고, stock-agent에서 해석한 뒤 Telegram 메시지로 전송할 수 있습니다.
+
+See:
+
+참고:
+
+- [`docs/tradingview-webhook.md`](docs/tradingview-webhook.md)
+- `config/tradingview_webhook.env.example`
+
+## Security / 보안
+
+Do not commit real tokens, secrets, webhook keys, local databases, or logs.
+
+실제 토큰, secret, webhook key, 로컬 DB, 로그는 커밋하지 않습니다.
+
+Ignored runtime files include:
+
+Git에서 제외되는 런타임 파일 예시:
+
+- `.env`, `*.env`, `.env.*`
+- `data/*.db`
+- `logs/`
+- `__pycache__/`, `*.pyc`
+- local tunnel binaries such as `tools/cloudflared`
+
+## Disclaimer / 면책
+
+This repository is for investment research and decision support only. It does not provide financial advice and does not guarantee trading performance. Always verify live prices, filings, news, liquidity, and risk before making trades.
+
+이 저장소는 투자 리서치와 의사결정 보조 목적입니다. 투자 자문이 아니며 수익을 보장하지 않습니다. 매매 전 현재가, 공시, 뉴스, 유동성, 리스크를 반드시 직접 확인해야 합니다.
