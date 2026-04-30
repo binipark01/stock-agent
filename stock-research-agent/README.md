@@ -49,7 +49,7 @@ WSL에서 Python 환경이 externally managed라면:
 python3 -m pip install --user --break-system-packages -r requirements.txt
 ```
 
-## New machine setup / 새 컴퓨터 설치
+## Setup / 설치
 
 Clone this repository on the target computer and enter the agent folder:
 
