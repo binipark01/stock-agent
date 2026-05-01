@@ -32,6 +32,8 @@
 - 토스증권 공개 미국지수/미국뉴스 수집.
 - TradingView webhook server and Telegram notification helpers.
 - TradingView webhook 서버 및 Telegram 알림 보조 기능.
+- Reddit public sentiment search for ticker/topic checks.
+- Reddit 공개 반응 검색으로 종목/테마 소셜 분위기 확인.
 
 ## Quick start / 빠른 시작
 
@@ -151,6 +153,9 @@ python3 src/main.py --mode yfinance_pack "NVDA yfinance 싹 가져와"
 python3 src/main.py --mode sec_filings "NVDA 최근 8-K 10-Q 공시 요약"
 python3 src/main.py --mode topic_hub "NVDA topic hub 보여줘"
 
+# Social sentiment / 소셜 반응
+python3 src/main.py --mode reddit_search "레딧 NVDA 반응"
+
 # Ingestion / 수집
 python3 src/main.py --mode ingest "NVDA MSFT AMZN 데이터 수집"
 python3 src/main.py --mode saveticker_sync "SaveTicker 미국주 속보 수집"
@@ -181,6 +186,7 @@ python3 src/main.py --json '{"mode":"brief","symbols":["NVDA","MSFT","AMZN"],"po
 | `saveticker_sync` | SaveTicker ingestion | SaveTicker 수집 |
 | `saveticker_breaking` | Important breaking-news summary | 중요 속보 요약 |
 | `toss_sync` | TossInvest public data ingestion | 토스증권 공개 데이터 수집 |
+| `reddit_search` | Reddit public sentiment search | Reddit 공개 반응 검색 |
 | `social_search` | Threads seed-account search | Threads seed 계정 검색 |
 
 ## Project structure / 프로젝트 구조

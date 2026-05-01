@@ -25,6 +25,8 @@ def infer_mode(request: str, explicit_mode: str | None = None) -> str:
         return "earnings_preview"
     if any(keyword in lowered for keyword in ["실적", "earnings", "어닝"]):
         return "earnings"
+    if any(keyword in lowered for keyword in ["reddit", "레딧"]):
+        return "reddit_search"
     if any(keyword in lowered for keyword in ["threads", "스레드", "팔로잉", "social"]):
         return "social_search"
     if any(keyword in lowered for keyword in ["왜", "why ", "봐야 해", "체크해야 해"]):
