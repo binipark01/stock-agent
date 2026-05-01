@@ -24,7 +24,6 @@ try:
     from .earnings_preview import build_earnings_preview
     from .saveticker_data import build_saveticker_brief, build_saveticker_important_breaking, map_saveticker_item, run_saveticker_ingest, score_saveticker_item
     from .threads_social import search_threads_seed_accounts
-    from .reddit_social import build_reddit_search_payload
     from .yfinance_data import build_yfinance_focus_lines, fetch_yfinance_market_pack
     from .sec_filings import build_sec_focus_lines, fetch_sec_filings_pack
     from .topic_hub import build_topic_hub_focus_lines
@@ -50,7 +49,6 @@ except ImportError:  # direct script execution
     from earnings_preview import build_earnings_preview
     from saveticker_data import build_saveticker_brief, build_saveticker_important_breaking, map_saveticker_item, run_saveticker_ingest, score_saveticker_item
     from threads_social import search_threads_seed_accounts
-    from reddit_social import build_reddit_search_payload
     from yfinance_data import build_yfinance_focus_lines, fetch_yfinance_market_pack
     from sec_filings import build_sec_focus_lines, fetch_sec_filings_pack
     from topic_hub import build_topic_hub_focus_lines
@@ -1235,18 +1233,6 @@ def build_response(request: str, runtime_context: dict | None = None, explicit_m
             "features": runtime_context.get("features", []),
         }
 
-    if mode == "reddit_search":
-        summary, focus, next_actions = build_reddit_search_payload(request_text, symbols)
-        return {
-            "agent": "stock-research-agent",
-            "mode": mode,
-            "summary": summary,
-            "symbols": symbols,
-            "focus": focus,
-            "next_actions": next_actions,
-            "features": runtime_context.get("features", []) + ["reddit_public_search"],
-        }
-
     if mode == "social_search":
         summary, focus, next_actions = build_social_search_payload(request_text, symbols)
         return {
@@ -1362,7 +1348,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="stock research agent")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--context-json", default="{}")
-    parser.add_argument("--mode", choices=["ingest", "saveticker_sync", "saveticker_breaking", "toss_sync", "earnings_preview", "earnings", "sec_filings", "topic_hub", "sector_strength", "compare", "what_changed", "overnight_recap", "why_symbol", "reddit_search", "social_search", "technical_snapshot", "yfinance_pack", "brief", "portfolio_guard", "symbol_review"], default=None)
+    parser.add_argument("--mode", choices=["ingest", "saveticker_sync", "saveticker_breaking", "toss_sync", "earnings_preview", "earnings", "sec_filings", "topic_hub", "sector_strength", "compare", "what_changed", "overnight_recap", "why_symbol", "social_search", "technical_snapshot", "yfinance_pack", "brief", "portfolio_guard", "symbol_review"], default=None)
     parser.add_argument("request", nargs="*")
     args = parser.parse_args()
 

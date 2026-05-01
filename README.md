@@ -29,8 +29,6 @@ This repository currently focuses on:
 - SaveTicker 속보 수집 및 티커/루머 분류.
 - TradingView webhook to stock-agent to Telegram alert workflow.
 - TradingView webhook → stock-agent → Telegram 알림 워크플로우.
-- Reddit public sentiment search for ticker/topic checks.
-- Reddit 공개 반응 검색으로 종목/테마 소셜 분위기 확인.
 - Technical snapshot with trend, RSI, MACD, support/resistance, stop level, and action bias.
 - 추세, RSI, MACD, 지지/저항, 손절 기준, action bias 기반 기술적 스냅샷.
 
@@ -52,7 +50,6 @@ python3 src/main.py --mode brief "오늘 뭐 봐야 해?"
 python3 src/main.py --mode sector_strength "장중 섹터별 강한 섹터 약한 섹터 알려줘"
 python3 src/main.py --mode technical_snapshot "NVDA 차트 기술적 스냅샷 보여줘"
 python3 src/main.py --mode sec_filings "NVDA 최근 8-K 10-Q 공시 요약"
-python3 src/main.py --mode reddit_search "레딧 NVDA 반응"
 ```
 
 ## Setup / 설치
@@ -136,7 +133,6 @@ cp config/tradingview_webhook.env.example config/tradingview_webhook.env
 | `earnings` | Earnings date check | 실적 일정 확인 |
 | `earnings_preview` | Earnings preview pack | 실적 프리뷰 팩 |
 | `saveticker_sync` | SaveTicker news ingestion | SaveTicker 뉴스 수집 |
-| `reddit_search` | Reddit public sentiment search | Reddit 공개 반응 검색 |
 | `toss_sync` | TossInvest public market/news ingestion | 토스증권 공개 시장/뉴스 수집 |
 
 ## Repository structure / 구조
