@@ -35,6 +35,22 @@ class TradingViewWebhookTest(unittest.TestCase):
                 "price": 44.02,
                 "timestamp": "2026-04-28T11:36:50-04:00",
                 "change_pct": -8.98,
+                "volume": "12345678",
+            }
+
+        def fake_technical_builder(symbol: str):
+            return {"support": 43.5, "resistance": 46.5, "action_bias": "저항 돌파 전 추격 금지"}
+
+        def fake_options_builder(symbol: str):
+            return {
+                "available": True,
+                "summary": f"{symbol} 옵션판: 풋 거래량 우위, 방어/하방 헤지 강함",
+                "focus_lines": [
+                    f"옵션판: {symbol} / price 44.02 / expiry 2026-05-01 / P/C vol 1.50 / P/C OI 0.90",
+                    "콜월/풋월: 콜 46.0 / 풋 40.0 / max pain 44.0",
+                    "옵션 트리거: put_volume_hedge, unusual_options_activity",
+                ],
+                "next_actions": [],
             }
 
         result = build_tradingview_webhook_response(
@@ -47,17 +63,25 @@ class TradingViewWebhookTest(unittest.TestCase):
             },
             agent_runner=fake_agent_runner,
             quote_fetcher=fake_quote_fetcher,
+            technical_snapshot_builder=fake_technical_builder,
+            options_report_builder=fake_options_builder,
         )
 
         self.assertEqual(result["status"], "ok")
         self.assertEqual(result["symbol"], "IREN")
         self.assertEqual(result["trigger"]["price"], 44.01)
         self.assertEqual(captured["explicit_mode"], "brief")
-        self.assertIn('"symbols": ["IREN"]', captured["request"])
+        self.assertIn('\"symbols\": [\"IREN\"]', captured["request"])
         self.assertTrue(result["message_lines"][0].startswith("TradingView alert: IREN @ 44.01"))
         self.assertEqual(result["live_quote"]["price"], 44.02)
         self.assertTrue(any("현재가: 44.02" in line and "CNBC quote" in line for line in result["message_lines"]))
+        self.assertTrue(any("거래량" in line and "12,345,678" in line for line in result["message_lines"]))
+        self.assertTrue(any("테마:" in line for line in result["message_lines"]))
+        self.assertTrue(any("지지/저항" in line and "43.5" in line and "46.5" in line for line in result["message_lines"]))
+        self.assertTrue(any("추격/눌림 판단" in line for line in result["message_lines"]))
         self.assertTrue(any("옵션" in line for line in result["message_lines"]))
+        self.assertTrue(any("옵션 트리거" in line and "put_volume_hedge" in line for line in result["message_lines"]))
+
 
     def test_verify_webhook_secret_accepts_header_query_and_bearer(self) -> None:
         self.assertTrue(verify_webhook_secret({"X-TradingView-Secret": "abc"}, {}, "abc"))

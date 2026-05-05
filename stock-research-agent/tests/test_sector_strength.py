@@ -46,6 +46,71 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertTrue(any("고베타" in action or "추격" in action for action in report["next_actions"]))
         self.assertTrue(any("시장 레짐" in line and "리스크오프" in line for line in report["focus_lines"]))
 
+    def test_oil_vix_report_detects_vol_backwardation_and_oil_shock(self) -> None:
+        from src.sector_strength import build_oil_vix_report
+
+        quotes = {
+            "SPY": {"symbol": "SPY", "price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "QQQ": {"symbol": "QQQ", "price": 430.0, "previous_close": 430.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "^VIX": {"symbol": "^VIX", "price": 27.0, "previous_close": 22.5, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "^VIX9D": {"symbol": "^VIX9D", "price": 30.0, "previous_close": 23.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "^VIX3M": {"symbol": "^VIX3M", "price": 24.0, "previous_close": 24.5, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "CL=F": {"symbol": "CL=F", "price": 85.0, "previous_close": 80.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "BZ=F": {"symbol": "BZ=F", "price": 89.0, "previous_close": 85.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "XLE": {"symbol": "XLE", "price": 100.0, "previous_close": 98.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "OIH": {"symbol": "OIH", "price": 330.0, "previous_close": 320.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "XOP": {"symbol": "XOP", "price": 150.0, "previous_close": 145.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+        }
+
+        report = build_oil_vix_report(quotes, collected_at="2026-05-03T13:35:00+00:00")
+
+        self.assertEqual(report["vix"]["structure"], "backwardation")
+        self.assertEqual(report["oil"]["state"], "oil_shock")
+        self.assertIn("vix_backwardation", report["alerts"])
+        self.assertIn("oil_shock", report["alerts"])
+        self.assertTrue(any("트리거" in line and "oil_shock" in line for line in report["focus_lines"]))
+        self.assertTrue(any("VIX 구조" in line and "백워데이션" in line for line in report["focus_lines"]))
+        self.assertTrue(any("유가" in line and "WTI" in line and "Brent" in line for line in report["focus_lines"]))
+        self.assertTrue(any("에너지 주식" in line and "OIH" in line and "XOP" in line for line in report["focus_lines"]))
+        self.assertTrue(any("헤지" in action or "추격" in action for action in report["next_actions"]))
+
+    def test_oil_vix_report_detects_intraday_minute_spikes(self) -> None:
+        from src.sector_strength import build_oil_vix_report
+
+        quotes = {
+            "^VIX": {"symbol": "^VIX", "price": 19.2, "previous_close": 18.9, "pct_change_5m": 5.8, "pct_change_15m": 8.4, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "^VIX9D": {"symbol": "^VIX9D", "price": 19.5, "previous_close": 19.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "^VIX3M": {"symbol": "^VIX3M", "price": 22.0, "previous_close": 22.0, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "CL=F": {"symbol": "CL=F", "price": 81.2, "previous_close": 80.8, "pct_change_5m": 1.3, "pct_change_15m": 2.2, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+            "BZ=F": {"symbol": "BZ=F", "price": 84.0, "previous_close": 83.8, "pct_change_5m": 0.8, "pct_change_15m": 1.4, "source": "unit", "timestamp": "2026-05-03T13:35:00+00:00"},
+        }
+
+        report = build_oil_vix_report(quotes, collected_at="2026-05-03T13:35:00+00:00")
+
+        self.assertIn("vix_5m_spike", report["alerts"])
+        self.assertIn("wti_5m_spike", report["alerts"])
+        self.assertTrue(any("분봉 급등" in line and "VIX 5m +5.80%" in line and "WTI 5m +1.30%" in line for line in report["focus_lines"]))
+
+    def test_market_regime_report_includes_score_and_trading_difficulty(self) -> None:
+        from src.sector_strength import build_market_regime_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 500.0},
+            "QQQ": {"price": 426.0, "previous_close": 430.0},
+            "^VIX": {"price": 27.0, "previous_close": 22.5},
+            "^VIX9D": {"price": 30.0, "previous_close": 23.0},
+            "^VIX3M": {"price": 24.0, "previous_close": 24.5},
+            "CL=F": {"price": 85.0, "previous_close": 80.0},
+            "BZ=F": {"price": 89.0, "previous_close": 85.0},
+        }
+
+        report = build_market_regime_report(quotes, collected_at="2026-05-03T13:35:00+00:00")
+
+        self.assertEqual(report["trading_difficulty"]["label"], "어려움")
+        self.assertGreaterEqual(report["scores"]["vol_stress_score"], 3)
+        self.assertGreaterEqual(report["scores"]["oil_pressure_score"], 2)
+        self.assertTrue(any("오늘 매매 난이도" in line and "어려움" in line for line in report["focus_lines"]))
+
     def test_returns_unavailable_report_when_benchmarks_are_missing(self) -> None:
         from src.sector_strength import build_sector_strength_report
 
@@ -133,6 +198,22 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertEqual(report["watchlist_movers"][0]["symbol"], "RKLB")
         self.assertEqual(report["watchlist_movers"][0]["theme"], "우주/항공우주")
         self.assertTrue(any("오늘 먼저 볼 종목" in line and "RKLB" in line and "COIN" in line for line in report["focus_lines"]))
+
+    def test_theme_basket_lines_include_trading_value_when_quote_has_volume(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "QQQ": {"price": 430.0, "previous_close": 430.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 27.0, "volume": 1_000_000, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "LUNR": {"price": 12.6, "previous_close": 12.0, "volume": 500_000, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-04-30T13:35:00+00:00")
+        space = next(row for row in report["theme_baskets"] if row["key"] == "space_aerospace")
+
+        self.assertEqual(space["trading_value"], 36300000.0)
+        self.assertTrue(any("강한 테마" in line and "거래대금" in line for line in report["focus_lines"]))
 
     def test_photo_theme_baskets_drive_primary_summary_not_broad_etfs(self) -> None:
         from src.sector_strength import build_sector_strength_report

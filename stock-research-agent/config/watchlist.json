@@ -1,4 +1,16 @@
 {
-  "watchlist": ["NVDA", "MSFT", "AMZN", "META", "GOOGL", "TSLA"],
-  "portfolio": []
+  "watchlist": ["NVDA", "MSFT", "AMZN", "META", "GOOGL", "TSLA", "RDDT", "PLTR", "CRWV"],
+  "portfolio": [],
+  "lists": {
+    "ai_infra": ["NVDA", "MSFT", "AMZN", "META", "GOOGL", "PLTR", "CRWV", "RDDT", "VRT", "DELL", "NBIS", "ORCL", "NET"],
+    "optical": ["AAOI", "LITE", "COHR", "CIEN", "FN", "NOK", "ERIC"],
+    "reddit_rddt": ["RDDT"],
+    "crypto": ["MSTR", "COIN", "HOOD", "CRCL", "MARA", "RIOT", "CLSK", "IREN", "WULF", "CIFR"],
+    "nuclear": ["OKLO", "SMR", "CCJ", "UEC", "URA", "UUUU", "DNN", "NXE", "GEV", "VST", "CEG", "TLN", "ETN"],
+    "semis": ["NVDA", "AMD", "AVGO", "MRVL", "ARM", "QCOM", "INTC", "MU", "TSM", "AMAT", "LRCX", "KLAC", "SMCI", "VRT", "SOXX", "SMH"],
+    "space": ["RKLB", "LUNR", "RDW", "ASTS", "PL", "BKSY", "RCAT", "JOBY", "ACHR", "SATS", "GSAT"],
+    "quantum": ["IONQ", "RGTI", "QBTS", "QUBT", "ARQQ", "LAES", "BTQ"],
+    "healthcare": ["HIMS", "TDOC", "OSCR", "RXRX", "LLY", "NVO", "PFE", "UNH"],
+    "biotech_later": ["XBI", "IBB"]
+  }
 }

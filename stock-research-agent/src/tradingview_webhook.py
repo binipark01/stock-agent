@@ -7,8 +7,14 @@ import urllib.request
 from typing import Any, Callable
 
 try:
+    from .options_flow import build_options_flow_report
+    from .sector_theme_config import USER_SUB_THEME_BASKETS, USER_THEME_BASKETS
+    from .technical_snapshot import build_technical_snapshot
     from .yfinance_data import build_yfinance_signal_lines
 except ImportError:  # direct script execution
+    from options_flow import build_options_flow_report  # type: ignore
+    from sector_theme_config import USER_SUB_THEME_BASKETS, USER_THEME_BASKETS  # type: ignore
+    from technical_snapshot import build_technical_snapshot  # type: ignore
     from yfinance_data import build_yfinance_signal_lines  # type: ignore
 
 
@@ -29,6 +35,47 @@ def _coerce_float(value: Any) -> float | None:
         return float(str(value).replace(",", ""))
     except ValueError:
         return None
+
+
+def _format_int(value: Any) -> str | None:
+    numeric = _coerce_float(value)
+    if numeric is None:
+        return None
+    return f"{int(numeric):,}"
+
+
+def _themes_for_symbol(symbol: str) -> list[str]:
+    upper = normalize_tradingview_symbol(symbol)
+    themes: list[str] = []
+    for basket in USER_THEME_BASKETS.values():
+        symbols = {str(item).upper() for item in basket.get("symbols", ())}
+        if upper in symbols:
+            themes.append(str(basket.get("name") or "테마"))
+    for basket in USER_SUB_THEME_BASKETS.values():
+        symbols = {str(item).upper() for item in basket.get("symbols", ())}
+        if upper in symbols:
+            themes.append(str(basket.get("name") or "세부테마"))
+    return list(dict.fromkeys(themes))
+
+
+def _alert_action_judgment(alert_name: str, live_quote: dict[str, Any], technical_snapshot: dict[str, Any] | None = None) -> str:
+    pct = _coerce_float(live_quote.get("change_pct") or live_quote.get("pct_change"))
+    lowered = str(alert_name or "").lower()
+    if pct is not None and pct >= 5:
+        base = "당일 급등권이라 추격 위험, VWAP/직전 돌파선 지지 확인"
+    elif pct is not None and pct >= 2:
+        base = "모멘텀은 살아있지만 추격보다 눌림 확인 우선"
+    elif pct is not None and pct <= -3:
+        base = "약세 알림이면 반등매수보다 지지선 회복 확인 우선"
+    else:
+        base = "방향 확인 전에는 신호 발생 캔들 고점/저점 재확인"
+    if any(keyword in lowered for keyword in ["break", "돌파", "고점", "high"]):
+        base = "돌파 알림: 첫 캔들 추격보다 리테스트/VWAP 지지 확인"
+    if any(keyword in lowered for keyword in ["이탈", "breakdown", "crossing down", "하향"]):
+        base = "이탈 알림: 지지선 회복 전까지 신규 진입 보류"
+    if technical_snapshot and technical_snapshot.get("action_bias"):
+        base += f" / 기술적 bias: {technical_snapshot['action_bias']}"
+    return base
 
 
 def parse_tradingview_payload(raw_body: str) -> dict[str, Any]:
@@ -126,6 +173,8 @@ def build_tradingview_webhook_response(
     agent_runner: Callable[..., dict[str, Any]] | None = None,
     quote_fetcher: Callable[[str], dict[str, Any]] | None = None,
     runtime_context: dict[str, Any] | None = None,
+    technical_snapshot_builder: Callable[[str], dict[str, Any]] | None = None,
+    options_report_builder: Callable[[str], dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     runner = agent_runner or _default_agent_runner
     symbol = normalize_tradingview_symbol(payload.get("symbol") or payload.get("ticker"))
@@ -139,6 +188,15 @@ def build_tradingview_webhook_response(
     except Exception as exc:
         live_quote = {"source": "quote_fetch_failed", "error": str(exc), "symbol": symbol}
     agent_payload = runner(agent_request, runtime_context=runtime_context or {}, explicit_mode="brief")
+    themes = _themes_for_symbol(symbol)
+    try:
+        technical_snapshot = (technical_snapshot_builder or build_technical_snapshot)(symbol) if symbol != "UNKNOWN" else None
+    except Exception:
+        technical_snapshot = None
+    try:
+        options_report = (options_report_builder or build_options_flow_report)(symbol) if symbol != "UNKNOWN" else None
+    except Exception:
+        options_report = None
 
     price_text = f"{price:g}" if price is not None else "가격 미제공"
     header = f"TradingView alert: {symbol} @ {price_text}"
@@ -157,8 +215,23 @@ def build_tradingview_webhook_response(
         if live_quote.get("timestamp"):
             quote_line += f" / {live_quote['timestamp']}"
         message_lines.append(quote_line)
+        volume_text = _format_int(live_quote.get("volume") or live_quote.get("regularMarketVolume"))
+        if volume_text:
+            message_lines.append(f"거래량: {volume_text}")
     elif live_quote.get("error"):
         message_lines.append(f"현재가 확인 실패: {live_quote['error']}")
+    message_lines.append(f"테마: {', '.join(themes[:3]) if themes else '매핑 없음'}")
+    if technical_snapshot:
+        support = technical_snapshot.get("support")
+        resistance = technical_snapshot.get("resistance")
+        if support is not None or resistance is not None:
+            message_lines.append(f"지지/저항: 지지 {support if support is not None else 'n/a'} / 저항 {resistance if resistance is not None else 'n/a'}")
+    message_lines.append(f"추격/눌림 판단: {_alert_action_judgment(alert_name, live_quote, technical_snapshot)}")
+    if options_report and options_report.get("available"):
+        for line in list(options_report.get("focus_lines") or [])[:4]:
+            message_lines.append(str(line))
+    elif options_report and options_report.get("summary"):
+        message_lines.append(str(options_report.get("summary")))
     summary = agent_payload.get("summary")
     if summary:
         message_lines.append(f"분석: {summary}")

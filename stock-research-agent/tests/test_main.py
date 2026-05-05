@@ -44,6 +44,148 @@ class StockResearchAgentTest(unittest.TestCase):
 
         self.assertEqual(payload["mode"], "sector_strength")
 
+    def test_market_regime_mode_returns_regime_only_focus(self) -> None:
+        payload = build_response(
+            "지금 시장 레짐 판단해줘",
+            runtime_context={
+                "sector_quotes": {
+                    "SPY": {"symbol": "SPY", "price": 500.0, "previous_close": 500.0},
+                    "QQQ": {"symbol": "QQQ", "price": 430.0, "previous_close": 430.0},
+                    "^VIX": {"symbol": "^VIX", "price": 25.0, "previous_close": 22.0},
+                    "CL=F": {"symbol": "CL=F", "price": 84.0, "previous_close": 80.0},
+                    "^TNX": {"symbol": "^TNX", "price": 46.0, "previous_close": 45.0},
+                    "DX-Y.NYB": {"symbol": "DX-Y.NYB", "price": 107.0, "previous_close": 105.0},
+                },
+                "collected_at": "2026-05-02T13:35:00+00:00",
+            },
+        )
+
+        self.assertEqual(payload["mode"], "market_regime")
+        self.assertIn("리스크오프", payload["summary"])
+        self.assertTrue(any("시장 레짐" in item and "리스크오프" in item for item in payload["focus"]))
+        self.assertIn("market_regime", payload["features"])
+
+    def test_oil_vix_mode_returns_oil_and_vix_focus(self) -> None:
+        payload = build_response(
+            "유가랑 vix 좀 봐줘",
+            runtime_context={
+                "sector_quotes": {
+                    "SPY": {"symbol": "SPY", "price": 500.0, "previous_close": 500.0},
+                    "QQQ": {"symbol": "QQQ", "price": 430.0, "previous_close": 430.0},
+                    "^VIX": {"symbol": "^VIX", "price": 27.0, "previous_close": 22.5},
+                    "^VIX9D": {"symbol": "^VIX9D", "price": 30.0, "previous_close": 23.0},
+                    "^VIX3M": {"symbol": "^VIX3M", "price": 24.0, "previous_close": 24.5},
+                    "CL=F": {"symbol": "CL=F", "price": 85.0, "previous_close": 80.0},
+                    "BZ=F": {"symbol": "BZ=F", "price": 89.0, "previous_close": 85.0},
+                    "XLE": {"symbol": "XLE", "price": 100.0, "previous_close": 98.0},
+                    "OIH": {"symbol": "OIH", "price": 330.0, "previous_close": 320.0},
+                    "XOP": {"symbol": "XOP", "price": 150.0, "previous_close": 145.0},
+                },
+                "collected_at": "2026-05-03T13:35:00+00:00",
+            },
+        )
+
+        self.assertEqual(payload["mode"], "oil_vix")
+        self.assertIn("VIX", payload["summary"])
+        self.assertTrue(any("VIX 구조" in item for item in payload["focus"]))
+        self.assertTrue(any("유가" in item and "WTI" in item for item in payload["focus"]))
+
+    def test_watchlist_scan_mode_uses_named_watchlists_and_runtime_quotes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            watchlist_path = Path(tmpdir) / "watchlist.json"
+            watchlist_path.write_text(
+                json.dumps(
+                    {
+                        "watchlist": ["레딧", "NVDA"],
+                        "portfolio": ["TSLA"],
+                        "lists": {"optical": ["AAOI", "LITE"], "crypto": ["COIN", "MARA"]},
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            quotes = {
+                "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+                "RDDT": {"price": 162.0, "previous_close": 150.0, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+                "NVDA": {"price": 104.0, "previous_close": 100.0, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+                "TSLA": {"price": 190.0, "previous_close": 200.0, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+                "AAOI": {"price": 18.0, "previous_close": 16.0, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+                "LITE": {"price": 70.0, "previous_close": 69.0, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+                "COIN": {"price": 220.0, "previous_close": 210.0, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+                "MARA": {"price": 14.0, "previous_close": 14.2, "source": "unit", "timestamp": "2026-05-02T13:35:00+00:00"},
+            }
+
+            payload = build_response(
+                json.dumps({"request": "광통신 watchlist만 봐줘", "watchlist_path": str(watchlist_path)}, ensure_ascii=False),
+                runtime_context={"watchlist_quotes": quotes, "collected_at": "2026-05-02T13:35:00+00:00"},
+            )
+
+        self.assertEqual(payload["mode"], "watchlist_scan")
+        self.assertEqual(payload["symbols"], ["AAOI", "LITE"])
+        self.assertTrue(any("관심종목 범위: optical" in item for item in payload["focus"]))
+        self.assertTrue(any("관심종목 스캔" in item and "AAOI" in item for item in payload["focus"]))
+        self.assertTrue(any("리스트별 강도" in item and "optical" in item for item in payload["focus"]))
+        self.assertEqual(payload["data"]["watchlist_scan"]["top_movers"][0]["symbol"], "AAOI")
+
+    def test_options_flow_mode_returns_compact_options_focus(self) -> None:
+        payload = build_response(
+            json.dumps(
+                {
+                    "request": "NVDA 옵션판 빡세게 봐줘",
+                    "symbols": ["NVDA"],
+                    "options_payload": {
+                        "timestamp": "2026-05-01T15:30:00",
+                        "data": {
+                            "symbol": "NVDA",
+                            "current_price": 152.0,
+                            "options": [
+                                {"option": "NVDA260501C00150000", "volume": 5000, "open_interest": 1000, "iv": 0.65, "delta": 0.55, "gamma": 0.025},
+                                {"option": "NVDA260501P00140000", "volume": 2400, "open_interest": 600, "iv": 0.75, "delta": -0.30, "gamma": 0.018},
+                            ],
+                        },
+                    },
+                },
+                ensure_ascii=False,
+            )
+        )
+
+        self.assertEqual(payload["mode"], "options_flow")
+        self.assertTrue(any("옵션판" in item for item in payload["focus"]))
+        self.assertIn("options_flow", payload["features"])
+        self.assertEqual(payload["data"]["options_flow"]["source"], "cboe_delayed")
+
+    def test_options_sweep_mode_uses_watchlist_symbols_and_payload_map(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            watchlist_path = Path(tmpdir) / "watchlist.json"
+            watchlist_path.write_text(json.dumps({"watchlist": ["NVDA", "RDDT"], "portfolio": [], "lists": {}}, ensure_ascii=False), encoding="utf-8")
+            payload = build_response(
+                json.dumps(
+                    {
+                        "request": "내 관심종목 옵션 스윕해줘",
+                        "watchlist_path": str(watchlist_path),
+                        "options_payloads": {
+                            "NVDA": {
+                                "timestamp": "2026-05-01T15:30:00",
+                                "data": {
+                                    "symbol": "NVDA",
+                                    "current_price": 152.0,
+                                    "options": [
+                                        {"option": "NVDA260501C00150000", "volume": 5000, "open_interest": 1000, "iv": 0.65, "delta": 0.55, "gamma": 0.025},
+                                        {"option": "NVDA260501P00140000", "volume": 500, "open_interest": 800, "iv": 0.75, "delta": -0.30, "gamma": 0.018},
+                                    ],
+                                },
+                            },
+                            "RDDT": {"timestamp": "2026-05-01T15:30:00", "data": {"symbol": "RDDT", "current_price": 100.0, "options": []}},
+                        },
+                    },
+                    ensure_ascii=False,
+                )
+            )
+
+        self.assertEqual(payload["mode"], "options_sweep")
+        self.assertTrue(any("옵션 관심종목" in item and "NVDA" in item for item in payload["focus"]))
+        self.assertEqual(payload["data"]["options_sweep"]["ranked"][0]["symbol"], "NVDA")
+
     def test_saveticker_breaking_mode_returns_only_important_alerts(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "stock_agent.db"

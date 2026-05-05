@@ -97,7 +97,7 @@ USER_SUB_THEME_BASKETS: dict[str, dict[str, Any]] = {
 }
 
 BENCHMARK_SYMBOLS = ("SPY", "QQQ")
-REGIME_SYMBOLS = ("^VIX", "CL=F", "BZ=F", "^TNX", "DX-Y.NYB", "BTC-USD", "ETH-USD")
+REGIME_SYMBOLS = ("^VIX", "^VIX9D", "^VIX3M", "VIXY", "VXX", "CL=F", "BZ=F", "USO", "BNO", "OIH", "XOP", "^TNX", "DX-Y.NYB", "BTC-USD", "ETH-USD")
 USER_THEME_SYMBOLS = tuple(symbol for basket in USER_THEME_BASKETS.values() for symbol in basket["symbols"])
 USER_SUB_THEME_SYMBOLS = tuple(symbol for basket in USER_SUB_THEME_BASKETS.values() for symbol in basket["symbols"])
 DEFAULT_SECTOR_STRENGTH_SYMBOLS = tuple(dict.fromkeys((*BENCHMARK_SYMBOLS, *CORE_SECTOR_ETFS, *THEME_ETFS, *USER_THEME_SYMBOLS, *USER_SUB_THEME_SYMBOLS, *REGIME_SYMBOLS)))

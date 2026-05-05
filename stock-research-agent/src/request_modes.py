@@ -7,7 +7,17 @@ def infer_mode(request: str, explicit_mode: str | None = None) -> str:
     lowered = request.lower()
     if any(keyword in lowered for keyword in ["topic", "topics", "list topics", "peek topic", "데이터허브", "datahub", "data hub"]):
         return "topic_hub"
-    if any(keyword in lowered for keyword in ["sector strength", "sector_strength", "섹터 강약", "섹터별", "강한 섹터", "약한 섹터", "장중 섹터", "시장 레짐", "market regime"]):
+    if any(keyword in lowered for keyword in ["관심종목 옵션", "워치리스트 옵션", "watchlist options", "options sweep", "옵션 스윕", "옵션스윕"]):
+        return "options_sweep"
+    if any(keyword in lowered for keyword in ["watchlist", "watch list", "관심종목", "워치리스트", "관심 종목", "훑어봐", "스캔"]):
+        return "watchlist_scan"
+    if any(keyword in lowered for keyword in ["옵션", "옵션판", "콜월", "풋월", "option", "options", "call wall", "put wall", "max pain"]):
+        return "options_flow"
+    if any(keyword in lowered for keyword in ["유가", "vix", "wti", "brent", "브렌트", "오일", "oil", "변동성"]):
+        return "oil_vix"
+    if any(keyword in lowered for keyword in ["market regime", "시장 레짐", "장 레짐", "risk-on", "risk off", "risk-off", "리스크온", "리스크오프"]):
+        return "market_regime"
+    if any(keyword in lowered for keyword in ["sector strength", "sector_strength", "섹터 강약", "섹터별", "강한 섹터", "약한 섹터", "장중 섹터", "주도섹터", "주도 섹터", "주도 테마", "테마 랭킹"]):
         return "sector_strength"
     if any(keyword in lowered for keyword in ["yfinance", "yf pack", "yf팩", "야후팩"]):
         return "yfinance_pack"

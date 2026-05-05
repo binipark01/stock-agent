@@ -74,6 +74,34 @@ def _fmt_price(value: Any) -> str:
     return "n/a" if numeric is None else f"{numeric:g}"
 
 
+def _fmt_trading_value(value: Any) -> str:
+    numeric = _to_float(value)
+    if numeric is None:
+        return "n/a"
+    if abs(numeric) >= 1_000_000_000:
+        return f"${numeric / 1_000_000_000:.1f}B"
+    if abs(numeric) >= 1_000_000:
+        return f"${numeric / 1_000_000:.1f}M"
+    if abs(numeric) >= 1_000:
+        return f"${numeric / 1_000:.1f}K"
+    return f"${numeric:.0f}"
+
+
+def _quote_volume(quote: dict[str, Any]) -> float | None:
+    return _to_float(quote.get("volume") or quote.get("regularMarketVolume") or quote.get("day_volume"))
+
+
+def _quote_trading_value(quote: dict[str, Any]) -> float | None:
+    direct = _to_float(quote.get("trading_value") or quote.get("turnover") or quote.get("dollar_volume"))
+    if direct is not None:
+        return direct
+    volume = _quote_volume(quote)
+    price = _to_float(quote.get("price") or quote.get("last") or quote.get("last_price") or quote.get("regularMarketPrice"))
+    if volume is None or price is None:
+        return None
+    return volume * price
+
+
 def _korean_regime_label(label: str) -> str:
     return {"risk_off": "리스크오프", "risk_on": "리스크온", "neutral": "중립"}.get(label, label)
 
@@ -102,6 +130,19 @@ def _classify_regime(quotes: dict[str, dict[str, Any]]) -> dict[str, Any]:
     elif vix_pct is not None and vix_pct <= -5:
         risk_on_score += 1
         signals.append(f"VIX 하락 {_fmt_pct(vix_pct)}")
+    vix9d_price = _to_float(quotes.get("^VIX9D", {}).get("price"))
+    vix3m_price = _to_float(quotes.get("^VIX3M", {}).get("price"))
+    if vix_price is not None and vix3m_price is not None:
+        vix_curve = vix_price - vix3m_price
+        if vix_curve >= 1:
+            risk_off_score += 2
+            signals.append(f"VIX 백워데이션 VIX-3M {vix_curve:+.1f}p")
+        elif vix_curve <= -4 and vix_price < 20:
+            risk_on_score += 1
+            signals.append(f"VIX 콘탱고 VIX-3M {vix_curve:+.1f}p")
+    if vix_price is not None and vix9d_price is not None and vix9d_price > vix_price + 1:
+        risk_off_score += 1
+        signals.append(f"단기 변동성 9D가 VIX 상회 {vix9d_price - vix_price:+.1f}p")
 
     for symbol, name in (("CL=F", "WTI"), ("BZ=F", "Brent")):
         quote = quotes.get(symbol, {})
@@ -112,6 +153,16 @@ def _classify_regime(quotes: dict[str, dict[str, Any]]) -> dict[str, Any]:
         elif pct is not None and pct <= -2:
             risk_on_score += 1
             signals.append(f"{name}/오일 하락 {_fmt_pct(pct)}")
+    oil_proxy_pcts = [_pct_change(quotes.get(symbol, {})) for symbol in ("XLE", "OIH", "XOP")]
+    oil_proxy_pcts = [pct for pct in oil_proxy_pcts if pct is not None]
+    crude_pcts = [_pct_change(quotes.get(symbol, {})) for symbol in ("CL=F", "BZ=F")]
+    crude_pcts = [pct for pct in crude_pcts if pct is not None]
+    if crude_pcts and max(crude_pcts) >= 4:
+        risk_off_score += 1
+        signals.append(f"유가 급등 평균 {_fmt_pct(sum(crude_pcts) / len(crude_pcts))}")
+    if crude_pcts and oil_proxy_pcts and sum(crude_pcts) / len(crude_pcts) > 2 and sum(oil_proxy_pcts) / len(oil_proxy_pcts) < 0:
+        risk_off_score += 1
+        signals.append("유가 상승에도 에너지주 약세: 스태그/수요불안형")
 
     tnx_pct = _pct_change(quotes.get("^TNX", {}))
     if tnx_pct is not None and tnx_pct >= 1:
@@ -172,6 +223,8 @@ def _rank_sector_quotes(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
                 "relative_to_qqq_pct": relative_to_qqq,
                 "strength_score": score,
                 "price": quote.get("price"),
+                "volume": _quote_volume(quote),
+                "trading_value": _quote_trading_value(quote),
                 "source": quote.get("source"),
                 "timestamp": quote.get("timestamp") or quote.get("collected_at"),
             }
@@ -209,6 +262,8 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
                 "relative_to_spy_pct": round(pct - spy_pct, 2),
                 "relative_to_qqq_pct": round(pct - qqq_pct, 2),
                 "price": quote.get("price"),
+                "volume": _quote_volume(quote),
+                "trading_value": _quote_trading_value(quote),
                 "source": quote.get("source"),
                 "timestamp": quote.get("timestamp") or quote.get("collected_at"),
                 "score_eligible": symbol not in excluded,
@@ -219,6 +274,8 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
         if not score_rows:
             continue
         pct_values = [float(row["pct_change"]) for row in score_rows]
+        trading_values = [_to_float(row.get("trading_value")) for row in score_rows]
+        trading_values = [value for value in trading_values if value is not None]
         avg_pct = sum(pct_values) / len(pct_values)
         median_pct = _median(pct_values)
         breadth_positive_pct = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100
@@ -242,6 +299,7 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
                 "breadth_positive_pct": round(breadth_positive_pct, 1),
                 "relative_to_spy_pct": round(avg_relative_to_spy, 2),
                 "relative_to_qqq_pct": round(avg_relative_to_qqq, 2),
+                "trading_value": round(sum(trading_values), 2) if trading_values else None,
                 "strength_score": round(strength_score, 3),
                 "leaders": leaders,
                 "laggards": laggards,
@@ -273,6 +331,8 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, q
                 "relative_to_spy_pct": round(pct - spy_pct, 2),
                 "relative_to_qqq_pct": round(pct - qqq_pct, 2),
                 "price": quote.get("price"),
+                "volume": _quote_volume(quote),
+                "trading_value": _quote_trading_value(quote),
                 "source": quote.get("source"),
                 "timestamp": quote.get("timestamp") or quote.get("collected_at"),
                 "score_eligible": symbol not in excluded,
@@ -283,6 +343,8 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, q
         if not score_rows:
             continue
         pct_values = [float(row["pct_change"]) for row in score_rows]
+        trading_values = [_to_float(row.get("trading_value")) for row in score_rows]
+        trading_values = [value for value in trading_values if value is not None]
         avg_pct = sum(pct_values) / len(pct_values)
         median_pct = _median(pct_values)
         breadth_positive_pct = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100
@@ -308,6 +370,7 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, q
                 "breadth_positive_pct": round(breadth_positive_pct, 1),
                 "relative_to_spy_pct": round(avg_relative_to_spy, 2),
                 "relative_to_qqq_pct": round(avg_relative_to_qqq, 2),
+                "trading_value": round(sum(trading_values), 2) if trading_values else None,
                 "strength_score": round(strength_score, 3),
                 "leaders": leaders,
                 "laggards": laggards,
@@ -332,8 +395,10 @@ def _theme_line_for(prefix: str, rows: list[dict[str, Any]]) -> str:
     parts = []
     for row in rows[:3]:
         leaders = ", ".join(f"{leader['symbol']} {_fmt_pct(leader['pct_change'])}" for leader in row.get("leaders", [])[:2])
+        trading_value = row.get("trading_value")
+        value_text = f" / 거래대금 {_fmt_trading_value(trading_value)}" if trading_value is not None else ""
         parts.append(
-            f"{row['name']} 평균 {_fmt_pct(row['average_pct_change'])} / 상승비율 {row['breadth_positive_pct']:.1f}% / 주도 {leaders or 'n/a'}"
+            f"{row['name']} 평균 {_fmt_pct(row['average_pct_change'])} / 상승비율 {row['breadth_positive_pct']:.1f}%{value_text} / 주도 {leaders or 'n/a'}"
         )
     return f"{prefix}: " + " | ".join(parts)
 
@@ -344,8 +409,10 @@ def _sub_theme_line_for(prefix: str, rows: list[dict[str, Any]]) -> str:
     parts = []
     for row in rows[:3]:
         leaders = ", ".join(f"{leader['symbol']} {_fmt_pct(leader['pct_change'])}" for leader in row.get("leaders", [])[:2])
+        trading_value = row.get("trading_value")
+        value_text = f" / 거래대금 {_fmt_trading_value(trading_value)}" if trading_value is not None else ""
         parts.append(
-            f"{row['parent_name']} > {row['name']} 평균 {_fmt_pct(row['average_pct_change'])} / 상승비율 {row['breadth_positive_pct']:.1f}% / 주도 {leaders or 'n/a'}"
+            f"{row['parent_name']} > {row['name']} 평균 {_fmt_pct(row['average_pct_change'])} / 상승비율 {row['breadth_positive_pct']:.1f}%{value_text} / 주도 {leaders or 'n/a'}"
         )
     return f"{prefix}: " + " | ".join(parts)
 
@@ -570,6 +637,229 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
         "focus_lines": focus_lines,
         "next_actions": next_actions,
         "quotes": normalized,
+    }
+
+
+def _simple_quote_row(quotes: dict[str, dict[str, Any]], symbol: str) -> dict[str, Any]:
+    quote = quotes.get(symbol, {})
+    return {
+        "symbol": symbol,
+        "price": _to_float(quote.get("price")),
+        "pct_change": _pct_change(quote),
+        "pct_change_1m": _to_float(quote.get("pct_change_1m") or quote.get("change_1m_pct")),
+        "pct_change_5m": _to_float(quote.get("pct_change_5m") or quote.get("change_5m_pct")),
+        "pct_change_15m": _to_float(quote.get("pct_change_15m") or quote.get("change_15m_pct")),
+        "source": quote.get("source"),
+        "timestamp": quote.get("timestamp") or quote.get("collected_at"),
+    }
+
+
+def build_oil_vix_report(quotes: dict[str, Any], collected_at: str | None = None) -> dict[str, Any]:
+    normalized = {str(symbol).upper(): _normalize_quote(str(symbol), raw) for symbol, raw in (quotes or {}).items()}
+    collected_at = collected_at or next((str(q.get("timestamp") or q.get("collected_at")) for q in normalized.values() if q.get("timestamp") or q.get("collected_at")), None) or datetime.now(timezone.utc).isoformat()
+
+    vix = _simple_quote_row(normalized, "^VIX")
+    vix9d = _simple_quote_row(normalized, "^VIX9D")
+    vix3m = _simple_quote_row(normalized, "^VIX3M")
+    vix_level = vix.get("price")
+    vix3m_level = vix3m.get("price")
+    vix9d_level = vix9d.get("price")
+    vix_curve = round(vix_level - vix3m_level, 2) if vix_level is not None and vix3m_level is not None else None
+    vix_9d_spread = round(vix9d_level - vix_level, 2) if vix9d_level is not None and vix_level is not None else None
+    if vix_curve is not None and vix_curve >= 1:
+        structure = "backwardation"
+        structure_kr = "백워데이션"
+        vix_read = "공포/헤지 수요 우위"
+    elif vix_curve is not None and vix_curve <= -4:
+        structure = "contango"
+        structure_kr = "콘탱고"
+        vix_read = "정상/안정 구조"
+    else:
+        structure = "flat_or_unknown"
+        structure_kr = "평탄/불명확"
+        vix_read = "방향 확인 필요"
+    if vix_level is not None and vix_level >= 25:
+        vix_read = "고위험권, 헤지 수요 강함"
+    elif vix_level is not None and vix_level <= 16 and structure == "contango":
+        vix_read = "안정권, 변동성 매도 우위"
+
+    wti = _simple_quote_row(normalized, "CL=F")
+    brent = _simple_quote_row(normalized, "BZ=F")
+    xle = _simple_quote_row(normalized, "XLE")
+    oih = _simple_quote_row(normalized, "OIH")
+    xop = _simple_quote_row(normalized, "XOP")
+    crude_pcts = [pct for pct in (wti.get("pct_change"), brent.get("pct_change")) if pct is not None]
+    energy_pcts = [pct for pct in (xle.get("pct_change"), oih.get("pct_change"), xop.get("pct_change")) if pct is not None]
+    avg_crude_pct = round(sum(crude_pcts) / len(crude_pcts), 2) if crude_pcts else None
+    avg_energy_pct = round(sum(energy_pcts) / len(energy_pcts), 2) if energy_pcts else None
+    brent_wti_spread = round(brent["price"] - wti["price"], 2) if brent.get("price") is not None and wti.get("price") is not None else None
+    if avg_crude_pct is not None and avg_crude_pct >= 3:
+        oil_state = "oil_shock"
+        oil_read = "유가 급등/인플레 압력"
+    elif avg_crude_pct is not None and avg_crude_pct <= -3:
+        oil_state = "demand_scare"
+        oil_read = "유가 급락/수요 둔화 우려"
+    elif avg_crude_pct is not None and avg_crude_pct > 1 and avg_energy_pct is not None and avg_energy_pct > 1:
+        oil_state = "energy_reflation"
+        oil_read = "에너지주 동반 강세/리플레이션"
+    elif avg_crude_pct is not None and avg_crude_pct > 1 and avg_energy_pct is not None and avg_energy_pct < 0:
+        oil_state = "oil_equity_divergence"
+        oil_read = "유가는 오르는데 에너지주 약세, 수요불안/마진 부담"
+    else:
+        oil_state = "neutral"
+        oil_read = "유가 충격 제한"
+
+    focus_lines = [
+        f"VIX: {_fmt_price(vix.get('price'))} / {_fmt_pct(vix.get('pct_change'))} / 9D {_fmt_price(vix9d.get('price'))} / 3M {_fmt_price(vix3m.get('price'))}",
+        f"VIX 구조: {structure_kr} / VIX-3M {vix_curve:+.2f}p" if vix_curve is not None else "VIX 구조: 3M 데이터 부족",
+        f"유가: WTI {_fmt_price(wti.get('price'))} {_fmt_pct(wti.get('pct_change'))} / Brent {_fmt_price(brent.get('price'))} {_fmt_pct(brent.get('pct_change'))} / Brent-WTI {brent_wti_spread:+.2f}" if brent_wti_spread is not None else f"유가: WTI {_fmt_price(wti.get('price'))} {_fmt_pct(wti.get('pct_change'))} / Brent {_fmt_price(brent.get('price'))} {_fmt_pct(brent.get('pct_change'))}",
+        f"에너지 주식: XLE {_fmt_pct(xle.get('pct_change'))} / OIH {_fmt_pct(oih.get('pct_change'))} / XOP {_fmt_pct(xop.get('pct_change'))}",
+        f"해석: {vix_read} / {oil_read} / 기준시각 {collected_at}",
+    ]
+    intraday_spikes: list[str] = []
+    if _to_float(vix.get("pct_change_5m")) is not None and float(vix["pct_change_5m"]) >= 5:
+        intraday_spikes.append(f"VIX 5m {_fmt_pct(vix.get('pct_change_5m'))}")
+    elif _to_float(vix.get("pct_change_15m")) is not None and float(vix["pct_change_15m"]) >= 8:
+        intraday_spikes.append(f"VIX 15m {_fmt_pct(vix.get('pct_change_15m'))}")
+    if _to_float(wti.get("pct_change_5m")) is not None and float(wti["pct_change_5m"]) >= 1:
+        intraday_spikes.append(f"WTI 5m {_fmt_pct(wti.get('pct_change_5m'))}")
+    elif _to_float(wti.get("pct_change_15m")) is not None and float(wti["pct_change_15m"]) >= 2:
+        intraday_spikes.append(f"WTI 15m {_fmt_pct(wti.get('pct_change_15m'))}")
+    if _to_float(brent.get("pct_change_5m")) is not None and float(brent["pct_change_5m"]) >= 1:
+        intraday_spikes.append(f"Brent 5m {_fmt_pct(brent.get('pct_change_5m'))}")
+    elif _to_float(brent.get("pct_change_15m")) is not None and float(brent["pct_change_15m"]) >= 2:
+        intraday_spikes.append(f"Brent 15m {_fmt_pct(brent.get('pct_change_15m'))}")
+    if intraday_spikes:
+        focus_lines.insert(0, f"분봉 급등: {' / '.join(intraday_spikes)}")
+    alerts: list[str] = []
+    if vix_level is not None and vix_level >= 25:
+        alerts.append("vix_high")
+    if _to_float(vix.get("pct_change_5m")) is not None and float(vix["pct_change_5m"]) >= 5:
+        alerts.append("vix_5m_spike")
+    elif _to_float(vix.get("pct_change_15m")) is not None and float(vix["pct_change_15m"]) >= 8:
+        alerts.append("vix_15m_spike")
+    if structure == "backwardation":
+        alerts.append("vix_backwardation")
+    if vix_9d_spread is not None and vix_9d_spread >= 1:
+        alerts.append("vix9d_event_stress")
+    if oil_state == "oil_shock":
+        alerts.append("oil_shock")
+    if _to_float(wti.get("pct_change_5m")) is not None and float(wti["pct_change_5m"]) >= 1:
+        alerts.append("wti_5m_spike")
+    elif _to_float(wti.get("pct_change_15m")) is not None and float(wti["pct_change_15m"]) >= 2:
+        alerts.append("wti_15m_spike")
+    if _to_float(brent.get("pct_change_5m")) is not None and float(brent["pct_change_5m"]) >= 1:
+        alerts.append("brent_5m_spike")
+    elif _to_float(brent.get("pct_change_15m")) is not None and float(brent["pct_change_15m"]) >= 2:
+        alerts.append("brent_15m_spike")
+    if oil_state == "demand_scare":
+        alerts.append("oil_demand_scare")
+    if oil_state == "oil_equity_divergence":
+        alerts.append("oil_equity_divergence")
+    if alerts:
+        focus_lines.insert(0, f"트리거: {', '.join(alerts)}")
+    next_actions = [
+        "VIX 백워데이션이면 고베타 추격보다 헤지/현금비중 먼저 확인" if structure == "backwardation" else "VIX 콘탱고 유지면 주도 테마 눌림 위주로 후보 압축",
+        "유가 급등이 XLE/OIH/XOP 동반 강세인지 확인, 동반 약하면 원유 추격 금지",
+    ]
+    return {
+        "available": bool(vix.get("price") is not None or crude_pcts or energy_pcts),
+        "summary": f"Oil/VIX: {structure_kr} / {oil_read}",
+        "collected_at": collected_at,
+        "vix": {
+            "spot": vix,
+            "vix9d": vix9d,
+            "vix3m": vix3m,
+            "structure": structure,
+            "structure_kr": structure_kr,
+            "vix_minus_3m": vix_curve,
+            "vix9d_minus_vix": vix_9d_spread,
+            "read": vix_read,
+        },
+        "oil": {
+            "wti": wti,
+            "brent": brent,
+            "xle": xle,
+            "oih": oih,
+            "xop": xop,
+            "avg_crude_pct": avg_crude_pct,
+            "avg_energy_pct": avg_energy_pct,
+            "brent_wti_spread": brent_wti_spread,
+            "state": oil_state,
+            "read": oil_read,
+        },
+        "focus_lines": focus_lines,
+        "next_actions": next_actions,
+        "alerts": alerts,
+    }
+
+
+def build_market_regime_report(quotes: dict[str, Any], collected_at: str | None = None) -> dict[str, Any]:
+    report = build_sector_strength_report(quotes, collected_at=collected_at, top_n=3)
+    oil_vix = build_oil_vix_report(quotes, collected_at=collected_at or report.get("collected_at"))
+    regime = report.get("regime") or {"label": "unavailable", "korean_label": "데이터 부족", "signals": []}
+    label = str(regime.get("korean_label") or regime.get("label") or "데이터 부족")
+    signals = [str(signal) for signal in regime.get("signals", [])]
+    benchmark_line = "벤치마크: 데이터 부족"
+    if report.get("available"):
+        benchmarks = report.get("benchmarks") or {}
+        benchmark_line = f"벤치마크: SPY {_fmt_pct(benchmarks.get('SPY'))} / QQQ {_fmt_pct(benchmarks.get('QQQ'))} / 기준시각 {report.get('collected_at')}"
+    if regime.get("label") == "risk_off":
+        action = "리스크오프: 고베타/성장주 추격매수 낮추고 손절선 짧게"
+    elif regime.get("label") == "risk_on":
+        action = "리스크온: 주도 테마 눌림 우선, 약한 종목 추격 제외"
+    else:
+        action = "중립장: 테마별 강약 확인 후 주도주만 선별"
+    vol_stress_score = 0
+    if oil_vix.get("vix", {}).get("spot", {}).get("price") is not None and float(oil_vix["vix"]["spot"]["price"]) >= 25:
+        vol_stress_score += 2
+    if oil_vix.get("vix", {}).get("structure") == "backwardation":
+        vol_stress_score += 2
+    if oil_vix.get("vix", {}).get("vix9d_minus_vix") is not None and float(oil_vix["vix"]["vix9d_minus_vix"]) >= 1:
+        vol_stress_score += 1
+    oil_pressure_score = 0
+    if oil_vix.get("oil", {}).get("state") == "oil_shock":
+        oil_pressure_score += 2
+    elif oil_vix.get("oil", {}).get("state") in {"demand_scare", "oil_equity_divergence"}:
+        oil_pressure_score += 1
+    risk_off_score = int(regime.get("risk_off_score") or 0)
+    risk_on_score = int(regime.get("risk_on_score") or 0)
+    total_stress = risk_off_score + vol_stress_score + oil_pressure_score
+    if total_stress >= 6 or (vol_stress_score >= 4 and oil_pressure_score >= 2):
+        difficulty = {"label": "어려움", "reason": "변동성/유가 충격 동시 발생"}
+    elif total_stress >= 3:
+        difficulty = {"label": "보통", "reason": "리스크 신호 일부 존재"}
+    elif regime.get("label") == "risk_on" and vol_stress_score == 0:
+        difficulty = {"label": "쉬움", "reason": "리스크온에 변동성 압력 낮음"}
+    else:
+        difficulty = {"label": "보통", "reason": "방향성 확인 필요"}
+    scores = {
+        "risk_off_score": risk_off_score,
+        "risk_on_score": risk_on_score,
+        "vol_stress_score": vol_stress_score,
+        "oil_pressure_score": oil_pressure_score,
+        "total_stress_score": total_stress,
+    }
+    return {
+        "available": bool(report.get("available")),
+        "summary": f"시장 레짐: {label}",
+        "collected_at": report.get("collected_at"),
+        "regime": regime,
+        "focus_lines": [
+            f"오늘 매매 난이도: {difficulty['label']} / {difficulty['reason']} / stress {total_stress}",
+            f"시장 레짐: {label} / {'; '.join(signals[:4]) if signals else '신호 부족'}",
+            benchmark_line,
+            *oil_vix["focus_lines"][:3],
+            f"해석: {action}",
+        ],
+        "next_actions": [
+            action,
+            "레짐이 명확하지 않으면 SPY/QQQ/IWM과 주도 테마 상승비율을 5분 뒤 재확인",
+        ],
+        "source_report": report,
+        "oil_vix": oil_vix,
+        "scores": scores,
+        "trading_difficulty": difficulty,
     }
 
 

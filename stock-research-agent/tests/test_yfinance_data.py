@@ -224,8 +224,8 @@ class YfinanceDataTest(unittest.TestCase):
                             "chartPreviousClose": 76.46,
                             "regularMarketTime": 1777492802,
                         },
-                        "timestamp": [1777551700, 1777551757],
-                        "indicators": {"quote": [{"close": [66.0, 66.1]}]},
+                        "timestamp": list(range(1777550800, 1777550800 + 16 * 60, 60)),
+                        "indicators": {"quote": [{"close": [64.8, 64.9, 65.0, 65.1, 65.2, 65.3, 65.4, 65.5, 65.6, 65.7, 65.8, 65.9, 66.0, 66.02, 66.05, 66.1], "volume": [100] * 16}]},
                     }
                 ],
                 "error": None,
@@ -248,6 +248,11 @@ class YfinanceDataTest(unittest.TestCase):
         self.assertEqual(pack["quote"]["pct_change"], 1.72)
         self.assertEqual(pack["quote"]["regular_market_price"], 64.98)
         self.assertEqual(pack["quote"]["chart_previous_close"], 76.46)
+        self.assertEqual(pack["quote"]["volume"], 1600)
+        self.assertEqual(pack["quote"]["trading_value"], 104837.0)
+        self.assertEqual(pack["quote"]["pct_change_1m"], 0.08)
+        self.assertEqual(pack["quote"]["pct_change_5m"], 0.46)
+        self.assertEqual(pack["quote"]["pct_change_15m"], 2.01)
 
     def test_quote_pack_uses_only_fast_quote_fields_for_intraday_alerts(self):
         fake_yfinance = types.SimpleNamespace(Ticker=_FakeQuoteOnlyTicker)

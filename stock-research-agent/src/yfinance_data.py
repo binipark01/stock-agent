@@ -240,12 +240,23 @@ def _build_quote_from_fast_info(symbol: str, fast_info: Any, fallback_info: dict
     }
 
 
+def _intraday_pct(points: list[tuple[Any, Any]], minutes: int) -> float | None:
+    if len(points) <= minutes:
+        return None
+    latest = _to_float(points[-1][1])
+    baseline = _to_float(points[-1 - minutes][1])
+    if latest is None or baseline in (None, 0):
+        return None
+    return round(((latest - float(baseline)) / float(baseline)) * 100, 2)
+
+
 def _quote_from_yahoo_chart_result(symbol: str, result: dict[str, Any]) -> dict[str, Any]:
     meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
     timestamps = result.get("timestamp") if isinstance(result.get("timestamp"), list) else []
     quote_blocks = result.get("indicators", {}).get("quote", []) if isinstance(result.get("indicators"), dict) else []
     quote_block = quote_blocks[0] if quote_blocks and isinstance(quote_blocks[0], dict) else {}
     closes = quote_block.get("close") if isinstance(quote_block.get("close"), list) else []
+    volumes = quote_block.get("volume") if isinstance(quote_block.get("volume"), list) else []
     points = [(ts, close) for ts, close in zip(timestamps, closes) if _to_float(close) is not None]
     if not points:
         raise ValueError("yahoo chart has no close points")
@@ -258,10 +269,24 @@ def _quote_from_yahoo_chart_result(symbol: str, result: dict[str, Any]) -> dict[
     pct_change = None
     if price_float is not None and previous_float not in (None, 0):
         pct_change = round(((price_float - float(previous_float)) / float(previous_float)) * 100, 2)
+    volume_points = [(_to_float(volume) or 0.0) for volume in volumes]
+    day_volume = sum(volume_points) if volume_points else None
+    trading_value_points = []
+    for close, volume in zip(closes, volumes):
+        close_float = _to_float(close)
+        volume_float = _to_float(volume)
+        if close_float is not None and volume_float is not None:
+            trading_value_points.append(close_float * volume_float)
+    trading_value = sum(trading_value_points) if trading_value_points else None
     return {
         "price": round(price_float, 2) if price_float is not None else None,
         "previous_close": round(previous_float, 2) if previous_float is not None else None,
         "pct_change": pct_change,
+        "pct_change_1m": _intraday_pct(points, 1),
+        "pct_change_5m": _intraday_pct(points, 5),
+        "pct_change_15m": _intraday_pct(points, 15),
+        "volume": int(day_volume) if day_volume is not None else None,
+        "trading_value": round(trading_value, 2) if trading_value is not None else None,
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName") or meta.get("exchange"),
         "timestamp": datetime.fromtimestamp(int(last_ts), timezone.utc).isoformat() if last_ts else None,

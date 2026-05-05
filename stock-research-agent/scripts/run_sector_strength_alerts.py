@@ -46,11 +46,29 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--change-only", action="store_true", help="send only when alert signature changes or cooldown expires")
     parser.add_argument("--cooldown-seconds", type=int, default=900, help="minimum repeat interval for unchanged alerts; default 900 seconds")
     parser.add_argument("--state-file", default=str(ROOT / "logs" / "sector_strength_alert_state.json"), help="state file for change-only/cooldown")
+    parser.add_argument("--mode", choices=["sector_strength", "oil_vix", "market_regime"], default="sector_strength", help="alert payload mode; oil_vix is for VIX/WTI spike alerts")
+    parser.add_argument("--trigger-only", action="store_true", help="send only when the selected mode has explicit trigger alerts")
     return parser
 
 
 def build_sector_response() -> dict[str, Any]:
     return build_response('{"mode":"sector_strength","request":"장중 섹터 강약 5분 알림"}')
+
+
+def build_oil_vix_response() -> dict[str, Any]:
+    return build_response('{"mode":"oil_vix","request":"VIX/WTI 급등 감시 알림"}')
+
+
+def build_market_regime_response() -> dict[str, Any]:
+    return build_response('{"mode":"market_regime","request":"시장 레짐 급변 감시 알림"}')
+
+
+def response_builder_for_mode(mode: str) -> ResponseBuilder:
+    if mode == "oil_vix":
+        return build_oil_vix_response
+    if mode == "market_regime":
+        return build_market_regime_response
+    return build_sector_response
 
 
 def _select_alert_focus_lines(focus: Any, max_items: int = 7) -> list[str]:
@@ -86,7 +104,13 @@ def _select_alert_focus_lines(focus: Any, max_items: int = 7) -> list[str]:
 def build_alert_text(payload: dict[str, Any]) -> str:
     lines: list[str] = []
     summary = str(payload.get("summary") or "장중 섹터 강약").strip()
-    lines.append(f"[Sector Strength Alert] {summary}")
+    if payload.get("mode") == "oil_vix":
+        prefix = "[Oil/VIX Spike Alert]"
+    elif payload.get("mode") == "market_regime":
+        prefix = "[Market Regime Alert]"
+    else:
+        prefix = "[Sector Strength Alert]"
+    lines.append(f"{prefix} {summary}")
 
     for text in _select_alert_focus_lines(payload.get("focus") or []):
         lines.append(f"- {text}")
@@ -152,7 +176,37 @@ def _first_symbol(rows: Any) -> str:
     return ""
 
 
+def _response_triggers(response: dict[str, Any]) -> list[str]:
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    if response.get("mode") == "oil_vix" and isinstance(data, dict):
+        oil_vix = data.get("oil_vix") if isinstance(data.get("oil_vix"), dict) else {}
+        alerts = oil_vix.get("alerts") if isinstance(oil_vix, dict) else []
+        return [str(item) for item in alerts] if isinstance(alerts, list) else []
+    return []
+
+
 def build_alert_signature(response: dict[str, Any]) -> str:
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    if response.get("mode") == "oil_vix":
+        oil_vix = (data or {}).get("oil_vix") if isinstance(data, dict) else {}
+        if not isinstance(oil_vix, dict):
+            oil_vix = {}
+        alerts = oil_vix.get("alerts") or []
+        if not isinstance(alerts, list):
+            alerts = []
+        alert_text = ",".join(str(item) for item in alerts) or "no_alert"
+        vix = oil_vix.get("vix") if isinstance(oil_vix.get("vix"), dict) else {}
+        oil = oil_vix.get("oil") if isinstance(oil_vix.get("oil"), dict) else {}
+        return "|".join(
+            str(item or "n/a")
+            for item in (
+                "oil_vix",
+                alert_text,
+                vix.get("structure") if isinstance(vix, dict) else None,
+                oil.get("state") if isinstance(oil, dict) else None,
+            )
+        )
+
     report = ((response.get("data") or {}).get("sector_strength") or {}) if isinstance(response.get("data"), dict) else {}
     if not isinstance(report, dict):
         report = {}
@@ -244,6 +298,7 @@ def run_once(
     change_only: bool = False,
     cooldown_seconds: int = 900,
     state_file: str | None = None,
+    trigger_only: bool = False,
     now_provider: Callable[[], datetime] = _now_utc,
 ) -> dict[str, Any]:
     now = _to_utc(now_provider())
@@ -256,6 +311,15 @@ def run_once(
         }
 
     response = response_builder()
+    if trigger_only and not _response_triggers(response):
+        return {
+            "status": "skipped",
+            "reason": "no_trigger",
+            "mode": response.get("mode", "sector_strength"),
+            "summary": response.get("summary"),
+            "signature": build_alert_signature(response),
+            "checked_at": now.isoformat(),
+        }
     state = _load_state(state_file)
     should_send, reason, signature = should_send_alert(response, state, now, change_only=change_only, cooldown_seconds=cooldown_seconds)
     if not should_send:
@@ -291,6 +355,7 @@ def main(argv: list[str] | None = None) -> int:
 
     while True:
         result = run_once(
+            response_builder=response_builder_for_mode(args.mode),
             dry_run=args.dry_run,
             env_file=args.env_file,
             timeout_seconds=args.timeout_seconds,
@@ -298,8 +363,9 @@ def main(argv: list[str] | None = None) -> int:
             change_only=args.change_only,
             cooldown_seconds=args.cooldown_seconds,
             state_file=args.state_file,
+            trigger_only=args.trigger_only,
         )
-        print(json.dumps(result, ensure_ascii=False) if args.as_json else f"sector_strength alert: {result.get('telegram')}", flush=True)
+        print(json.dumps(result, ensure_ascii=False) if args.as_json else f"{args.mode} alert: {result.get('telegram')}", flush=True)
         if args.once:
             return 0
         time.sleep(args.interval_seconds)

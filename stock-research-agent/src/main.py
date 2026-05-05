@@ -27,7 +27,9 @@ try:
     from .yfinance_data import build_yfinance_focus_lines, fetch_yfinance_market_pack
     from .sec_filings import build_sec_focus_lines, fetch_sec_filings_pack
     from .topic_hub import build_topic_hub_focus_lines
-    from .sector_strength import build_sector_strength_report, fetch_sector_strength_quotes
+    from .sector_strength import build_market_regime_report, build_oil_vix_report, build_sector_strength_report, fetch_sector_strength_quotes
+    from .watchlists import build_watchlist_scan, filter_watchlist_scope, flatten_watchlist_symbols, infer_watchlist_scope, load_watchlist, normalize_symbol
+    from .options_flow import build_options_flow_report, build_watchlist_options_sweep
     from .request_modes import infer_mode
     from .technical_snapshot import build_technical_snapshot
 except ImportError:  # direct script execution
@@ -52,7 +54,9 @@ except ImportError:  # direct script execution
     from yfinance_data import build_yfinance_focus_lines, fetch_yfinance_market_pack
     from sec_filings import build_sec_focus_lines, fetch_sec_filings_pack
     from topic_hub import build_topic_hub_focus_lines
-    from sector_strength import build_sector_strength_report, fetch_sector_strength_quotes
+    from sector_strength import build_market_regime_report, build_oil_vix_report, build_sector_strength_report, fetch_sector_strength_quotes
+    from watchlists import build_watchlist_scan, filter_watchlist_scope, flatten_watchlist_symbols, infer_watchlist_scope, load_watchlist, normalize_symbol
+    from options_flow import build_options_flow_report, build_watchlist_options_sweep
     from request_modes import infer_mode
     from technical_snapshot import build_technical_snapshot
 
@@ -60,24 +64,6 @@ except ImportError:  # direct script execution
 DEFAULT_SYMBOLS = ["NVDA", "TSLA", "AAPL", "MSFT", "AMZN", "META", "GOOGL", "AMD"]
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "stock_agent.db"
 DEFAULT_WATCHLIST_PATH = Path(__file__).resolve().parents[1] / "config" / "watchlist.json"
-
-
-def load_watchlist(path: str | Path | None = None) -> dict[str, list[str]]:
-    watchlist_path = Path(path or DEFAULT_WATCHLIST_PATH)
-    if not watchlist_path.exists():
-        return {"watchlist": DEFAULT_SYMBOLS[:3], "portfolio": []}
-    try:
-        data = json.loads(watchlist_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return {"watchlist": DEFAULT_SYMBOLS[:3], "portfolio": []}
-    if not isinstance(data, dict):
-        return {"watchlist": DEFAULT_SYMBOLS[:3], "portfolio": []}
-    watchlist = data.get("watchlist") or DEFAULT_SYMBOLS[:3]
-    portfolio = data.get("portfolio") or []
-    return {
-        "watchlist": [str(item) for item in watchlist],
-        "portfolio": [str(item) for item in portfolio],
-    }
 
 
 def parse_request_payload(raw_request: str) -> dict[str, Any]:
@@ -110,6 +96,13 @@ def infer_symbols(request: str, provided_symbols: list[str] | None = None, watch
         "AVGO": ["avgo", "broadcom", "브로드컴"],
         "TSM": ["tsm", "tsmc"],
         "PLTR": ["pltr", "palantir", "팔란티어"],
+        "RDDT": ["rddt", "reddit", "레딧"],
+        "OKLO": ["oklo", "오클로"],
+        "CRWV": ["crwv", "coreweave", "코어위브"],
+        "MSTR": ["mstr", "microstrategy", "마이크로스트래티지", "스트래티지"],
+        "COIN": ["coin", "coinbase", "코인베이스"],
+        "RGTI": ["rgti", "rigetti", "리게티"],
+        "IONQ": ["ionq", "아이온큐"],
         "BMNR": ["bmnr", "bitmine", "비트마인"],
         "QQQ": ["qqq", "나스닥 etf"],
         "SPY": ["spy", "s&p etf", "sp500 etf"],
@@ -993,6 +986,103 @@ def build_response(request: str, runtime_context: dict | None = None, explicit_m
         portfolio = set(runtime_context.get("portfolio") or watchlist_data["portfolio"])
     db_path = Path(payload.get("db_path") or runtime_context.get("db_path") or DEFAULT_DB_PATH)
 
+    if mode == "watchlist_scan":
+        scope = payload.get("watchlist_scope") or payload.get("list") or runtime_context.get("watchlist_scope") or infer_watchlist_scope(request_text, watchlist_data)
+        scoped_watchlist_data = filter_watchlist_scope(watchlist_data, scope)
+        watchlist_quotes = payload.get("watchlist_quotes") or payload.get("sector_quotes") or runtime_context.get("watchlist_quotes") or runtime_context.get("sector_quotes")
+        if not watchlist_quotes:
+            watch_symbols = list(dict.fromkeys(["SPY", *flatten_watchlist_symbols(scoped_watchlist_data)]))
+            watchlist_quotes = fetch_sector_strength_quotes(watch_symbols)
+        scan = build_watchlist_scan(
+            scoped_watchlist_data,
+            watchlist_quotes,
+            collected_at=payload.get("collected_at") or runtime_context.get("collected_at"),
+        )
+        focus_lines = list(scan["focus_lines"])
+        if scope:
+            focus_lines.insert(0, f"관심종목 범위: {scope}")
+        return {
+            "agent": "stock-research-agent",
+            "mode": mode,
+            "summary": scan["summary"] if not scope else f"{scope} watchlist - {scan['summary']}",
+            "symbols": flatten_watchlist_symbols(scoped_watchlist_data),
+            "focus": focus_lines,
+            "next_actions": scan["next_actions"],
+            "features": list(dict.fromkeys([*runtime_context.get("features", []), "watchlist_scan"])),
+            "data": {"watchlist_scan": scan},
+        }
+
+    if mode == "market_regime":
+        regime_quotes = payload.get("sector_quotes") or runtime_context.get("sector_quotes")
+        if not regime_quotes:
+            regime_quotes = fetch_sector_strength_quotes()
+        regime_report = build_market_regime_report(
+            regime_quotes,
+            collected_at=payload.get("collected_at") or runtime_context.get("collected_at"),
+        )
+        return {
+            "agent": "stock-research-agent",
+            "mode": mode,
+            "summary": regime_report["summary"],
+            "symbols": symbols,
+            "focus": regime_report["focus_lines"],
+            "next_actions": regime_report["next_actions"],
+            "features": list(dict.fromkeys([*runtime_context.get("features", []), "market_regime"])),
+            "data": {"market_regime": regime_report},
+        }
+
+    if mode == "oil_vix":
+        oil_vix_quotes = payload.get("sector_quotes") or runtime_context.get("sector_quotes")
+        if not oil_vix_quotes:
+            oil_vix_quotes = fetch_sector_strength_quotes()
+        oil_vix_report = build_oil_vix_report(
+            oil_vix_quotes,
+            collected_at=payload.get("collected_at") or runtime_context.get("collected_at"),
+        )
+        return {
+            "agent": "stock-research-agent",
+            "mode": mode,
+            "summary": oil_vix_report["summary"],
+            "symbols": symbols,
+            "focus": oil_vix_report["focus_lines"],
+            "next_actions": oil_vix_report["next_actions"],
+            "features": list(dict.fromkeys([*runtime_context.get("features", []), "oil_vix"])),
+            "data": {"oil_vix": oil_vix_report},
+        }
+
+    if mode == "options_sweep":
+        scope = payload.get("watchlist_scope") or payload.get("list") or runtime_context.get("watchlist_scope") or infer_watchlist_scope(request_text, watchlist_data)
+        scoped_watchlist_data = filter_watchlist_scope(watchlist_data, scope)
+        sweep_symbols = payload.get("symbols") or flatten_watchlist_symbols(scoped_watchlist_data)
+        options_payloads = payload.get("options_payloads") or runtime_context.get("options_payloads") or {}
+        sweep_report = build_watchlist_options_sweep(sweep_symbols, payloads=options_payloads, limit=int(payload.get("limit") or runtime_context.get("limit") or 12))
+        focus_lines = list(sweep_report["focus_lines"])
+        if scope:
+            focus_lines.insert(0, f"옵션 스윕 범위: {scope}")
+        return {
+            "agent": "stock-research-agent",
+            "mode": mode,
+            "summary": sweep_report["summary"] if not scope else f"{scope} options sweep - {sweep_report['summary']}",
+            "symbols": sweep_report["symbols"],
+            "focus": focus_lines,
+            "next_actions": sweep_report["next_actions"],
+            "features": list(dict.fromkeys([*runtime_context.get("features", []), "options_sweep", "options_flow"])),
+            "data": {"options_sweep": sweep_report},
+        }
+
+    if mode == "options_flow":
+        options_report = build_options_flow_report(symbols[0] if symbols else "UNKNOWN", cboe_payload=payload.get("options_payload") or runtime_context.get("options_payload"))
+        return {
+            "agent": "stock-research-agent",
+            "mode": mode,
+            "summary": options_report["summary"],
+            "symbols": symbols,
+            "focus": options_report["focus_lines"],
+            "next_actions": options_report["next_actions"],
+            "features": list(dict.fromkeys([*runtime_context.get("features", []), "options_flow"])),
+            "data": {"options_flow": options_report},
+        }
+
     if mode == "sector_strength":
         sector_quotes = payload.get("sector_quotes") or runtime_context.get("sector_quotes")
         if not sector_quotes:
@@ -1348,7 +1438,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="stock research agent")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--context-json", default="{}")
-    parser.add_argument("--mode", choices=["ingest", "saveticker_sync", "saveticker_breaking", "toss_sync", "earnings_preview", "earnings", "sec_filings", "topic_hub", "sector_strength", "compare", "what_changed", "overnight_recap", "why_symbol", "social_search", "technical_snapshot", "yfinance_pack", "brief", "portfolio_guard", "symbol_review"], default=None)
+    parser.add_argument("--mode", choices=["ingest", "saveticker_sync", "saveticker_breaking", "toss_sync", "earnings_preview", "earnings", "sec_filings", "topic_hub", "sector_strength", "watchlist_scan", "market_regime", "oil_vix", "options_flow", "options_sweep", "compare", "what_changed", "overnight_recap", "why_symbol", "social_search", "technical_snapshot", "yfinance_pack", "brief", "portfolio_guard", "symbol_review"], default=None)
     parser.add_argument("request", nargs="*")
     args = parser.parse_args()
 

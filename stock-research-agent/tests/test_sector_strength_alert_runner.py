@@ -20,11 +20,14 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertTrue(once_args.dry_run)
         self.assertEqual(once_args.interval_seconds, 60)
 
-        gated_args = parser.parse_args(["--market-hours-only", "--change-only", "--cooldown-seconds", "900", "--state-file", "/tmp/sector.json"])
+        gated_args = parser.parse_args(["--market-hours-only", "--change-only", "--cooldown-seconds", "900", "--state-file", "/tmp/sector.json", "--mode", "oil_vix"])
         self.assertTrue(gated_args.market_hours_only)
         self.assertTrue(gated_args.change_only)
         self.assertEqual(gated_args.cooldown_seconds, 900)
         self.assertEqual(gated_args.state_file, "/tmp/sector.json")
+        self.assertEqual(gated_args.mode, "oil_vix")
+        trigger_args = parser.parse_args(["--mode", "oil_vix", "--trigger-only"])
+        self.assertTrue(trigger_args.trigger_only)
 
     def test_build_alert_text_is_concise_and_includes_top_sector_and_regime(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
@@ -76,6 +79,33 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertIn("벤치마크", text)
         self.assertLessEqual(len(text), 1200)
 
+    def test_oil_vix_alert_signature_and_text_focus_on_triggers(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_signature, build_alert_text
+
+        response = {
+            "mode": "oil_vix",
+            "summary": "Oil/VIX: 백워데이션 / 유가 급등/인플레 압력",
+            "focus": [
+                "트리거: vix_high, vix_backwardation, oil_shock",
+                "VIX: 27 / +12.00% / 9D 30 / 3M 24",
+                "유가: WTI 85 +4.20% / Brent 88 +3.90%",
+            ],
+            "data": {
+                "oil_vix": {
+                    "alerts": ["vix_high", "vix_backwardation", "oil_shock"],
+                    "vix": {"structure": "backwardation", "spot": {"pct_change": 12.0}},
+                    "oil": {"state": "oil_shock", "wti": {"pct_change": 4.2}},
+                }
+            },
+            "next_actions": ["고베타 추격 중지"],
+        }
+
+        self.assertEqual(build_alert_signature(response), "oil_vix|vix_high,vix_backwardation,oil_shock|backwardation|oil_shock")
+        text = build_alert_text(response)
+        self.assertIn("vix_high", text)
+        self.assertIn("WTI", text)
+        self.assertIn("고베타", text)
+
     def test_once_dry_run_calls_telegram_helper_without_real_send(self) -> None:
         from scripts.run_sector_strength_alerts import run_once
 
@@ -99,6 +129,27 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         config = fake_sender.call_args.args[1]
         self.assertTrue(config.dry_run)
         self.assertEqual(config.env_file, "/tmp/fake.env")
+    def test_trigger_only_skips_oil_vix_when_no_explicit_alerts(self) -> None:
+        from scripts.run_sector_strength_alerts import run_once
+
+        response = {
+            "mode": "oil_vix",
+            "summary": "Oil/VIX: 콘탱고 / 유가 충격 제한",
+            "data": {"oil_vix": {"alerts": [], "vix": {"structure": "contango"}, "oil": {"state": "neutral"}}},
+        }
+        fake_sender = Mock(return_value={"ok": True, "dry_run": True})
+
+        result = run_once(
+            response_builder=Mock(return_value=response),
+            sender=fake_sender,
+            dry_run=True,
+            trigger_only=True,
+        )
+
+        self.assertEqual(result["status"], "skipped")
+        self.assertEqual(result["reason"], "no_trigger")
+        fake_sender.assert_not_called()
+
     def test_market_hours_only_skips_outside_regular_session_without_sending(self) -> None:
         from scripts.run_sector_strength_alerts import run_once
 
