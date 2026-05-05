@@ -13,6 +13,8 @@ def infer_mode(request: str, explicit_mode: str | None = None) -> str:
         return "watchlist_scan"
     if any(keyword in lowered for keyword in ["옵션", "옵션판", "콜월", "풋월", "option", "options", "call wall", "put wall", "max pain"]):
         return "options_flow"
+    if any(keyword in lowered for keyword in ["데이마켓", "데이장", "주간거래", "주간장", "주간 거래", "지금 열려있는 장", "토스 가격"]):
+        return "day_market"
     if any(keyword in lowered for keyword in ["유가", "vix", "wti", "brent", "브렌트", "오일", "oil", "변동성"]):
         return "oil_vix"
     if any(keyword in lowered for keyword in ["market regime", "시장 레짐", "장 레짐", "risk-on", "risk off", "risk-off", "리스크온", "리스크오프"]):

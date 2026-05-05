@@ -31,6 +31,11 @@ TOSS_US_INDEX_PAGES = {
     "SPX.CBI": ("S&P 500", "https://www.tossinvest.com/indices/SPX.CBI"),
     "SOX.NAI": ("필라델피아 반도체", "https://www.tossinvest.com/indices/SOX.NAI"),
 }
+TOSS_US_STOCK_CODES = {
+    # Observed public Toss stock-id for PLTR order page. This is not the ISIN.
+    # Jina-readable URL pattern: https://www.tossinvest.com/stocks/US20200930014/order
+    "PLTR": "US20200930014",
+}
 TOSS_NEWS_FEED_URL = "https://www.tossinvest.com/feed/news"
 US_NEWS_SYMBOL_KEYWORDS = {
     "NVDA": ["nvidia", "엔비디아"],
@@ -63,7 +68,7 @@ def _fetch_jina_markdown(url: str) -> str:
 
 
 def _parse_number(value: str) -> float:
-    cleaned = value.replace(",", "").replace("원", "").replace("주", "").replace("%", "").strip()
+    cleaned = re.sub(r"[^0-9+\-.]", "", value.replace(",", ""))
     if cleaned in {"-", "--", ""}:
         return 0.0
     return float(cleaned)
@@ -117,6 +122,158 @@ def parse_toss_index_markdown(index_code: str, markdown: str) -> dict:
         "low": _parse_number(row_match.group(low_idx)),
         "source": "tossinvest_jina",
         "note": f"latest daily row from tossinvest for {index_name}",
+    }
+
+
+def parse_toss_day_market_markdown(markdown: str, symbol: str | None = None, source_url: str | None = None) -> dict:
+    text = "\n".join(line.strip() for line in markdown.splitlines() if line.strip())
+    upper_symbol = (symbol or "").upper()
+
+    if not upper_symbol and source_url:
+        for candidate, toss_code in TOSS_US_STOCK_CODES.items():
+            if toss_code in source_url:
+                upper_symbol = candidate
+                break
+    if not upper_symbol:
+        symbol_match = re.search(r"\b([A-Z]{1,5})\b", text)
+        upper_symbol = symbol_match.group(1) if symbol_match else "UNKNOWN"
+
+    usd_match = re.search(r"\$\s*([+-]?[\d,]+(?:\.\d+)?)", text)
+    krw_match = re.search(r"([+-]?[\d,]+)\s*원", text)
+    session_match = re.search(r"(데이마켓|주간거래|주간장|데이장)", text)
+    session_label = session_match.group(1) if session_match else "데이마켓"
+
+    change_krw = None
+    change_pct = None
+    session_line = ""
+    for raw_line in markdown.splitlines():
+        if session_label in raw_line:
+            session_line = raw_line.strip()
+            break
+    if session_line:
+        change_match = re.search(r"([+-]?[\d,]+)\s*원", session_line)
+        pct_match = re.search(r"([+-]?[\d,]+(?:\.\d+)?)\s*%", session_line)
+        if change_match:
+            change_krw = _parse_number(change_match.group(1))
+        if pct_match:
+            pct_sign = -1 if (change_match and change_match.group(1).strip().startswith("-")) or "-" in session_line[: pct_match.start()] else 1
+            change_pct = pct_sign * abs(_parse_number(pct_match.group(1)))
+
+    time_match = re.search(r"\b(\d{1,2}:\d{2}:\d{2})\b", text)
+    volume_match = re.search(r"거래량\s*([\d,]+)", text)
+    if not volume_match:
+        volume_match = re.search(r"([\d,]+)\s*주", text)
+
+    if not usd_match:
+        raise ValueError(f"No Toss day-market USD quote found for {upper_symbol}")
+
+    return {
+        "symbol": upper_symbol,
+        "source": "tossinvest_jina",
+        "source_label": "Toss/Jina",
+        "source_url": source_url,
+        "session_label": session_label,
+        "usd_price": _parse_number(usd_match.group(1)),
+        "krw_price": _parse_number(krw_match.group(1)) if krw_match else None,
+        "change_krw": change_krw,
+        "change_pct": change_pct,
+        "last_trade_time": time_match.group(1) if time_match else None,
+        "volume": int(_parse_number(volume_match.group(1))) if volume_match else None,
+        "collected_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def fetch_toss_day_market_quote(symbol: str, stock_code: str | None = None, fetcher=None) -> dict:
+    upper_symbol = symbol.upper()
+    toss_code = stock_code or TOSS_US_STOCK_CODES.get(upper_symbol)
+    if not toss_code:
+        return {
+            "symbol": upper_symbol,
+            "available": False,
+            "reason": "unknown_toss_stock_code",
+            "source_label": "Toss/Jina",
+        }
+    source_url = f"https://www.tossinvest.com/stocks/{toss_code}/order"
+    try:
+        markdown = (fetcher or _fetch_jina_markdown)(source_url)
+        quote = parse_toss_day_market_markdown(markdown, symbol=upper_symbol, source_url=source_url)
+        quote["available"] = True
+        quote["toss_code"] = toss_code
+        return quote
+    except Exception as exc:
+        return {
+            "symbol": upper_symbol,
+            "available": False,
+            "reason": f"parse_or_fetch_failed: {exc}",
+            "source_url": source_url,
+            "source_label": "Toss/Jina",
+        }
+
+
+def _format_day_market_focus(quote: dict) -> str:
+    symbol = quote.get("symbol", "UNKNOWN")
+    if not quote.get("available", True):
+        return f"{symbol} 데이마켓: 가격 확인 실패 / reason={quote.get('reason', 'unknown')} / source={quote.get('source_label', 'Toss/Jina')}"
+    parts = [f"{symbol} {quote.get('session_label', '데이마켓')}: ${quote['usd_price']:.2f}"]
+    if quote.get("krw_price") is not None:
+        parts.append(f"{int(quote['krw_price']):,}원")
+    if quote.get("change_pct") is not None:
+        parts.append(f"{quote['change_pct']:+.2f}%")
+    if quote.get("change_krw") is not None:
+        parts.append(f"{int(quote['change_krw']):+,}원")
+    if quote.get("last_trade_time"):
+        parts.append(str(quote["last_trade_time"]))
+    if quote.get("volume") is not None:
+        parts.append(f"거래량 {int(quote['volume']):,}")
+    parts.append(f"source={quote.get('source_label', 'Toss/Jina')}")
+    return " / ".join(parts)
+
+
+def build_toss_day_market_quote_report(request: str, symbols: list[str] | None = None, runtime_context: dict | None = None) -> dict:
+    runtime_context = runtime_context or {}
+    requested_symbols = symbols or []
+    if not requested_symbols:
+        requested_symbols = [symbol for symbol in TOSS_US_STOCK_CODES if symbol.lower() in request.lower()]
+    if not requested_symbols:
+        requested_symbols = ["PLTR"]
+
+    markdown_map = runtime_context.get("toss_day_market_markdown") or {}
+    quote_map = runtime_context.get("day_market_quotes") or {}
+    code_map = {**TOSS_US_STOCK_CODES, **(runtime_context.get("toss_code_map") or {})}
+
+    quotes = []
+    for symbol in requested_symbols[:5]:
+        upper_symbol = symbol.upper()
+        if upper_symbol in quote_map:
+            quote = dict(quote_map[upper_symbol])
+            quote.setdefault("symbol", upper_symbol)
+            quote.setdefault("available", True)
+            quote.setdefault("source_label", "runtime")
+        elif upper_symbol in markdown_map:
+            quote = parse_toss_day_market_markdown(markdown_map[upper_symbol], symbol=upper_symbol, source_url=f"runtime://{upper_symbol}")
+            quote["available"] = True
+        else:
+            quote = fetch_toss_day_market_quote(upper_symbol, stock_code=code_map.get(upper_symbol), fetcher=runtime_context.get("toss_fetcher"))
+        quotes.append(quote)
+
+    available_quotes = [quote for quote in quotes if quote.get("available", True) and quote.get("usd_price") is not None]
+    if available_quotes:
+        first = available_quotes[0]
+        pct_text = f" ({first['change_pct']:+.2f}%)" if first.get("change_pct") is not None else ""
+        summary = f"토스 데이마켓: {first['symbol']} ${first['usd_price']:.2f}{pct_text}"
+    else:
+        summary = "토스 데이마켓 가격을 확인하지 못했습니다."
+
+    return {
+        "summary": summary,
+        "symbols": requested_symbols,
+        "quotes": quotes,
+        "focus_lines": [_format_day_market_focus(quote) for quote in quotes],
+        "next_actions": [
+            "데이마켓/주간거래는 국내 브로커별 호가·스프레드·체결 가능 수량 차이를 실매매 전 호가/스프레드 화면에서 확인",
+            "Yahoo 정규장/프리·애프터 가격과 혼동 금지: 이 값은 Toss 공개 페이지 기반 보조 가격",
+            "가격이 비거나 실패하면 Toss 페이지 구조 변경/공개 접근 제한 가능성이 있어 앱 현재가로 재확인",
+        ],
     }
 
 

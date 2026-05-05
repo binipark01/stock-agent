@@ -90,6 +90,28 @@ class StockResearchAgentTest(unittest.TestCase):
         self.assertTrue(any("VIX 구조" in item for item in payload["focus"]))
         self.assertTrue(any("유가" in item and "WTI" in item for item in payload["focus"]))
 
+    def test_day_market_mode_uses_runtime_toss_markdown_without_live_network(self) -> None:
+        markdown = """
+팔란티어 PLTR
+212,133원
+$142.87
+데이마켓 -4,691원 (2.16%)
+애프터마켓에서 -5,879원 (2.71%) 마감
+13:27:54
+거래량 319,968
+"""
+        payload = build_response(
+            json.dumps({"request": "PLTR 데이마켓 가격", "symbols": ["PLTR"], "mode": "day_market"}, ensure_ascii=False),
+            runtime_context={"toss_day_market_markdown": {"PLTR": markdown}},
+        )
+
+        self.assertEqual(payload["mode"], "day_market")
+        self.assertIn("PLTR $142.87", payload["summary"])
+        self.assertTrue(any("PLTR 데이마켓" in item and "212,133원" in item for item in payload["focus"]))
+        action_text = " ".join(payload["next_actions"])
+        self.assertIn("호가·스프레드", action_text)
+        self.assertIn("Yahoo", action_text)
+
     def test_watchlist_scan_mode_uses_named_watchlists_and_runtime_quotes(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             watchlist_path = Path(tmpdir) / "watchlist.json"

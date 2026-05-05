@@ -4,8 +4,11 @@ from pathlib import Path
 
 from src.repository import get_connection
 from src.tossinvest_data import (
+    build_toss_day_market_quote_report,
     build_toss_market_brief,
+    fetch_toss_day_market_quote,
     map_toss_news_item,
+    parse_toss_day_market_markdown,
     parse_toss_index_markdown,
     parse_toss_news_feed_markdown,
     store_toss_index_snapshot,
@@ -30,6 +33,16 @@ NEWS_SAMPLE = """
 [![Image 15](https://example.com/b.png) 팔란티어, 소프트웨어 비관론 여파 주가 7% 급락 [팔란티어+1.33%](https://www.tossinvest.com/stocks/US20200930014/order) 연합인포맥스 ・ 3시간 전](https://www.tossinvest.com/feed/news?contentType=news&contentParams=%7B%22id%22%3A%22infomax_123%22%7D)
 """
 
+DAY_MARKET_SAMPLE = """
+팔란티어 PLTR
+212,133원
+$142.87
+데이마켓 -4,691원 (2.16%)
+애프터마켓에서 -5,879원 (2.71%) 마감
+13:27:54
+거래량 319,968
+"""
+
 
 class TossinvestParserTest(unittest.TestCase):
     def test_parse_toss_index_markdown(self) -> None:
@@ -38,6 +51,39 @@ class TossinvestParserTest(unittest.TestCase):
         self.assertEqual(payload["close"], 6475.63)
         self.assertEqual(payload["change_pct"], 0.0)
         self.assertEqual(payload["trading_value_text"], "29.8조")
+
+    def test_parse_toss_day_market_markdown(self) -> None:
+        payload = parse_toss_day_market_markdown(DAY_MARKET_SAMPLE, symbol="PLTR", source_url="https://www.tossinvest.com/stocks/US20200930014/order")
+        self.assertEqual(payload["symbol"], "PLTR")
+        self.assertEqual(payload["session_label"], "데이마켓")
+        self.assertEqual(payload["usd_price"], 142.87)
+        self.assertEqual(payload["krw_price"], 212133)
+        self.assertEqual(payload["change_krw"], -4691)
+        self.assertEqual(payload["change_pct"], -2.16)
+        self.assertEqual(payload["last_trade_time"], "13:27:54")
+        self.assertEqual(payload["volume"], 319968)
+
+    def test_fetch_toss_day_market_quote_uses_known_stock_code(self) -> None:
+        seen_urls = []
+
+        def fake_fetch(url: str) -> str:
+            seen_urls.append(url)
+            return DAY_MARKET_SAMPLE
+
+        quote = fetch_toss_day_market_quote("PLTR", fetcher=fake_fetch)
+        self.assertTrue(quote["available"])
+        self.assertIn("US20200930014", seen_urls[0])
+        self.assertEqual(quote["usd_price"], 142.87)
+
+    def test_build_toss_day_market_quote_report_from_runtime_markdown(self) -> None:
+        report = build_toss_day_market_quote_report(
+            "PLTR 데이마켓 가격",
+            symbols=["PLTR"],
+            runtime_context={"toss_day_market_markdown": {"PLTR": DAY_MARKET_SAMPLE}},
+        )
+        self.assertIn("PLTR $142.87", report["summary"])
+        self.assertIn("호가·스프레드", " ".join(report["next_actions"]))
+        self.assertIn("Yahoo", " ".join(report["next_actions"]))
 
     def test_parse_toss_news_feed_markdown(self) -> None:
         items = parse_toss_news_feed_markdown(NEWS_SAMPLE)

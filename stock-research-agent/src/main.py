@@ -20,7 +20,7 @@ try:
         insert_price_snapshot,
     )
     from .market_data import fetch_earnings_event, fetch_price_snapshot, fetch_symbol_news
-    from .tossinvest_data import build_toss_market_brief, map_toss_news_item, run_toss_ingest, score_toss_news_item
+    from .tossinvest_data import build_toss_day_market_quote_report, build_toss_market_brief, map_toss_news_item, run_toss_ingest, score_toss_news_item
     from .earnings_preview import build_earnings_preview
     from .saveticker_data import build_saveticker_brief, build_saveticker_important_breaking, map_saveticker_item, run_saveticker_ingest, score_saveticker_item
     from .threads_social import search_threads_seed_accounts
@@ -47,7 +47,7 @@ except ImportError:  # direct script execution
         insert_price_snapshot,
     )
     from market_data import fetch_earnings_event, fetch_price_snapshot, fetch_symbol_news
-    from tossinvest_data import build_toss_market_brief, map_toss_news_item, run_toss_ingest, score_toss_news_item
+    from tossinvest_data import build_toss_day_market_quote_report, build_toss_market_brief, map_toss_news_item, run_toss_ingest, score_toss_news_item
     from earnings_preview import build_earnings_preview
     from saveticker_data import build_saveticker_brief, build_saveticker_important_breaking, map_saveticker_item, run_saveticker_ingest, score_saveticker_item
     from threads_social import search_threads_seed_accounts
@@ -1083,6 +1083,19 @@ def build_response(request: str, runtime_context: dict | None = None, explicit_m
             "data": {"options_flow": options_report},
         }
 
+    if mode == "day_market":
+        day_report = build_toss_day_market_quote_report(request_text, symbols=symbols, runtime_context=runtime_context)
+        return {
+            "agent": "stock-research-agent",
+            "mode": mode,
+            "summary": day_report["summary"],
+            "symbols": day_report["symbols"],
+            "focus": day_report["focus_lines"],
+            "next_actions": day_report["next_actions"],
+            "features": list(dict.fromkeys([*runtime_context.get("features", []), "day_market", "tossinvest_public"])),
+            "data": {"day_market": day_report},
+        }
+
     if mode == "sector_strength":
         sector_quotes = payload.get("sector_quotes") or runtime_context.get("sector_quotes")
         if not sector_quotes:
@@ -1438,7 +1451,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="stock research agent")
     parser.add_argument("--json", action="store_true", dest="as_json")
     parser.add_argument("--context-json", default="{}")
-    parser.add_argument("--mode", choices=["ingest", "saveticker_sync", "saveticker_breaking", "toss_sync", "earnings_preview", "earnings", "sec_filings", "topic_hub", "sector_strength", "watchlist_scan", "market_regime", "oil_vix", "options_flow", "options_sweep", "compare", "what_changed", "overnight_recap", "why_symbol", "social_search", "technical_snapshot", "yfinance_pack", "brief", "portfolio_guard", "symbol_review"], default=None)
+    parser.add_argument("--mode", choices=["ingest", "saveticker_sync", "saveticker_breaking", "toss_sync", "day_market", "earnings_preview", "earnings", "sec_filings", "topic_hub", "sector_strength", "watchlist_scan", "market_regime", "oil_vix", "options_flow", "options_sweep", "compare", "what_changed", "overnight_recap", "why_symbol", "social_search", "technical_snapshot", "yfinance_pack", "brief", "portfolio_guard", "symbol_review"], default=None)
     parser.add_argument("request", nargs="*")
     args = parser.parse_args()
 
