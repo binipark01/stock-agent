@@ -224,6 +224,7 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
                 "강한 테마: 우주 평균 +2.00% / 상승비율 80.0% / 주도 AAA1 +1.00% | 반도체 평균 +1.00% / 상승비율 70.0% / 주도 AAA2 +2.00%",
                 "약한 테마: 양자 평균 -2.00% / 상승비율 20.0% / 주도 AAA7 -1.00%",
                 f"테마별 대장주: {leaders}",
+                "전일종가 대비 현재 강세: RKLB +34.22% 05.47 / AMD +11.44% 55.19 / 기준 전일 정규장 종가 대비 현재가 / Yahoo chart 1m includePrePost",
                 "로테이션 해석: 우주 내부 발사체로 자금 이동 / 위성 약세",
                 "장 분위기: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20% / 기준시각 2026-05-07T13:35:00+00:00",
             ],
@@ -235,7 +236,8 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         for heading in ("4) 주도 종목", "5) 로테이션", "6) 매매 관점", "한줄 판단:"):
             self.assertIn(heading, text)
         self.assertIn("AAA1", text)
-        self.assertIn("AAA7", text)
+        self.assertIn("전일종가 대비 현재 강세", text)
+        self.assertIn("전일 정규장 종가 대비 현재가", text)
         self.assertIn("스토캐스틱 Slow", text)
         self.assertNotIn("[truncated]", text)
         self.assertLessEqual(len(text), 1200)

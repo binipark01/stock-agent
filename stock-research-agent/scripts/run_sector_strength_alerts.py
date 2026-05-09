@@ -214,7 +214,7 @@ def _indicator_head(details: str, label: str) -> str:
     return match.group(1).strip() if match else "n/a"
 
 
-def _compact_theme_leader(item: str) -> str:
+def _compact_theme_leader(item: str, include_indicators: bool = True) -> str:
     text = item.strip()
     if not text:
         return text
@@ -228,7 +228,7 @@ def _compact_theme_leader(item: str) -> str:
         rest_head = rest.split(",", 1)[0].strip()
         rest_head = re.sub(r"\b가격\s+([^,\s]+)", r"$\1", rest_head)
         base = f"{theme_label}: {rest_head}"
-    if not sep:
+    if not sep or not include_indicators:
         return base or text
     rsi = _indicator_head(details, "RSI")
     macd = _indicator_head(details, "MACD")
@@ -346,29 +346,42 @@ def _build_sector_telegram_text(payload: dict[str, Any]) -> str:
         if len(text) <= limit:
             return text
 
-    # Analysis-style mover lines are intentionally more verbose. Prefer fewer
-    # leading stocks over cutting off sections with a `[truncated]` marker.
-    for count in range(min(len(movers), 4), 0, -1):
-        text = render(movers[:count])
+    # Analysis-style mover lines are intentionally more verbose. Use this path
+    # only when there is no theme-leader block; otherwise it re-expands verbose
+    # leaders and can hide sections 5/6 plus the one-line conclusion.
+    if not theme_leaders:
+        for count in range(min(len(movers), 4), 0, -1):
+            text = render(movers[:count])
+            if len(text) <= limit:
+                return text
+
+        if movers:
+            first = movers[0]
+            if len(first) > 420:
+                first = first[:417].rstrip() + "..."
+            text = render([first])
         if len(text) <= limit:
             return text
 
-    if movers:
-        first = movers[0]
-        if len(first) > 420:
-            first = first[:417].rstrip() + "..."
-        text = render([first])
-    if len(text) <= limit:
-        return text
     if theme_leaders:
-        ultra_compact = []
-        for item in theme_leaders[:7]:
-            compact = _compact_theme_leader(item)
-            if len(compact) > 135:
-                compact = compact[:132].rstrip() + "..."
-            ultra_compact.append(compact)
-        text = render([], ultra_compact)
-    return text if len(text) <= limit else text[:limit].rsplit("\n", 1)[0].rstrip()
+        for indicator_count in (2, 1):
+            ultra_compact = [
+                _compact_theme_leader(item, include_indicators=(idx < indicator_count))
+                for idx, item in enumerate(theme_leaders[:7])
+            ]
+            text = render([], ultra_compact)
+            if len(text) <= limit:
+                return text
+        for count in range(min(len(theme_leaders), 7), 0, -1):
+            ultra_compact = [
+                _compact_theme_leader(item, include_indicators=False)
+                for item in theme_leaders[:count]
+            ]
+            text = render([], ultra_compact)
+            if len(text) <= limit:
+                return text
+
+    return text
 
 
 def build_alert_text(payload: dict[str, Any]) -> str:
