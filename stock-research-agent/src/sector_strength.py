@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
+import os
 from typing import Any
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None  # type: ignore
 
 try:
     from .sector_theme_config import (
@@ -72,6 +79,339 @@ def _fmt_pct(value: Any) -> str:
 def _fmt_price(value: Any) -> str:
     numeric = _to_float(value)
     return "n/a" if numeric is None else f"{numeric:g}"
+
+
+def _expected_session_label(now: datetime | None = None) -> str:
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    if ZoneInfo is not None:
+        et = now.astimezone(ZoneInfo("America/New_York"))
+        kst = now.astimezone(ZoneInfo("Asia/Seoul"))
+    else:  # pragma: no cover
+        et = now.astimezone(timezone.utc)
+        kst = now.astimezone(timezone.utc)
+    et_minutes = et.hour * 60 + et.minute
+    kst_minutes = kst.hour * 60 + kst.minute
+    if et.weekday() < 5 and 4 * 60 <= et_minutes < 9 * 60 + 30:
+        return "프리마켓"
+    if et.weekday() < 5 and 9 * 60 + 30 <= et_minutes < 16 * 60:
+        return "정규장"
+    if et.weekday() < 5 and 16 * 60 <= et_minutes < 20 * 60:
+        return "애프터장"
+    # Toss day-market/주간거래 is useful to Korean users after the US close.
+    # The exact window can change by broker; this covers the common daytime slot.
+    if kst.weekday() < 5 and 10 * 60 <= kst_minutes < 18 * 60:
+        return "토스 데이마켓/주간거래"
+    return "휴장/데이터 없음"
+
+
+def _session_needs_live_price(label: str | None) -> bool:
+    return str(label or "") in {"프리마켓", "애프터장", "토스 데이마켓/주간거래"}
+
+
+def _quote_session_label(quote: dict[str, Any]) -> str:
+    label = str(quote.get("session_label") or "").strip()
+    return label or _expected_session_label()
+
+
+def _display_meta_fields(quote: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {
+        "session_label": _quote_session_label(quote),
+        "price_source": quote.get("price_source") or quote.get("source"),
+        "pct_change_basis": quote.get("pct_change_basis"),
+    }
+    if quote.get("is_stale_regular_close"):
+        fields["is_stale_regular_close"] = True
+        fields["stale_note"] = quote.get("stale_note") or "정규장 종가 기준(확장/주간거래 실시간가 미확인)"
+    return fields
+
+
+def _row_price_session_text(row: dict[str, Any]) -> str:
+    price = _to_float(row.get("price"))
+    session = str(row.get("session_label") or "").strip()
+    basis = str(row.get("pct_change_basis") or "").strip()
+    stale = str(row.get("stale_note") or "").strip() if row.get("is_stale_regular_close") else ""
+    parts: list[str] = []
+    if price is not None:
+        parts.append(f"가격 {_fmt_price(price)}")
+    if session:
+        parts.append(session)
+    if basis:
+        parts.append(basis)
+    if stale:
+        parts.append(stale)
+    return ", ".join(parts)
+
+
+def _session_context_line(normalized: dict[str, dict[str, Any]]) -> str:
+    spy = normalized.get("SPY", {})
+    session = _quote_session_label(spy)
+    source = str(spy.get("price_source") or spy.get("source") or "unknown")
+    basis = str(spy.get("pct_change_basis") or "").strip()
+    stale = spy.get("stale_note") if spy.get("is_stale_regular_close") else None
+    if stale:
+        detail = f"{session} / {stale} / source {source}"
+    else:
+        detail = f"{session} / {basis or '정규장 종가 대비'} / source {source}"
+    return f"세션: {detail}"
+
+
+_TECHNICAL_FIELD_NAMES = (
+    "rsi14",
+    "rsi14_prev",
+    "rsi14_delta",
+    "bollinger_mid",
+    "bollinger_upper",
+    "bollinger_lower",
+    "bollinger_position_pct",
+    "bollinger_position_prev",
+    "bollinger_position_delta",
+    "bollinger_bandwidth_pct",
+    "bollinger_bandwidth_prev",
+    "bollinger_bandwidth_delta",
+    "bollinger_state",
+    "ichimoku_conversion",
+    "ichimoku_base",
+    "ichimoku_span_a",
+    "ichimoku_span_b",
+    "ichimoku_cloud_top",
+    "ichimoku_cloud_bottom",
+    "ichimoku_cloud_distance_pct",
+    "ichimoku_conversion_base_spread",
+    "ichimoku_cloud_state",
+    "macd_line",
+    "macd_signal",
+    "macd_histogram",
+    "macd_line_prev",
+    "macd_signal_prev",
+    "macd_histogram_prev",
+    "macd_histogram_delta",
+    "macd_state",
+    "stochastic_k",
+    "stochastic_d",
+    "stochastic_k_prev",
+    "stochastic_d_prev",
+    "stochastic_k_delta",
+    "stochastic_d_delta",
+    "stochastic_state",
+)
+
+
+def _technical_fields(quote: dict[str, Any]) -> dict[str, Any]:
+    return {field: quote.get(field) for field in _TECHNICAL_FIELD_NAMES if quote.get(field) is not None}
+
+
+def _fmt_indicator_value(value: Any, digits: int = 2) -> str:
+    numeric = _to_float(value)
+    if numeric is None:
+        return "n/a"
+    if digits <= 0:
+        return f"{numeric:.0f}"
+    text = f"{numeric:.{digits}f}".rstrip("0").rstrip(".")
+    return text or "0"
+
+
+def _fmt_signed(value: Any, digits: int = 0) -> str:
+    numeric = _to_float(value)
+    if numeric is None:
+        return ""
+    return f"{numeric:+.{digits}f}"
+
+
+def _fmt_delta_paren(value: Any, digits: int = 0) -> str:
+    signed = _fmt_signed(value, digits)
+    return f"({signed})" if signed else ""
+
+
+def _rsi_interpretation(rsi: float, delta: float | None = None) -> str:
+    if delta is not None:
+        if rsi >= 75 and delta > 0:
+            return "과열권 추가 진입, 추격 부담 확대"
+        if rsi >= 50 and delta >= 3:
+            return "50선 위에서 재가속, 매수세 회복"
+        if rsi >= 50 and delta <= -3:
+            return "50선 위지만 탄력 둔화"
+        if rsi <= 25 and delta < 0:
+            return "과매도권 추가 진입, 반등 확인 전"
+        if rsi < 45 and delta >= 3:
+            return "저점권 반등 시도, 확인 필요"
+        if rsi < 45 and delta <= -3:
+            return "약세권 추가 이탈, 매수세 부재"
+    if rsi >= 75:
+        return "과열권, 추격 부담"
+    if rsi <= 25:
+        return "과매도권, 반등 확인 필요"
+    if rsi >= 60:
+        return "상승 탄력 양호"
+    if rsi >= 45:
+        return "중립권"
+    if rsi >= 35:
+        return "저점권이나 반등 탄력 약함"
+    return "저점권이나 반등 확인 전"
+
+
+def _macd_interpretation(line: float | None, signal: float | None, histogram: float | None, histogram_delta: float | None, state: str | None) -> str:
+    if line is not None and signal is not None:
+        relation = "신호선 위" if line > signal else "신호선 아래" if line < signal else "신호선 접점"
+        if histogram is not None and histogram_delta is not None:
+            if histogram > 0 and histogram_delta > 0:
+                return f"{relation}·히스토그램 확대, 상승 모멘텀 강화"
+            if histogram > 0 and histogram_delta < 0:
+                return f"{relation}이나 히스토그램 축소, 상승 탄력 둔화"
+            if histogram < 0 and histogram_delta < 0:
+                return f"{relation}·히스토그램 악화, 하방 모멘텀 강화"
+            if histogram < 0 and histogram_delta > 0:
+                return f"{relation}이나 히스토그램 개선, 하락 둔화"
+        if state == "상방":
+            return f"{relation}, 상방 추세"
+        if state == "하방":
+            return f"{relation}, 하방 전환 주의"
+    if state == "상방":
+        return "상방 추세"
+    if state == "하방":
+        return "하방 추세"
+    return "방향성 약함"
+
+
+def _stochastic_interpretation(k_value: float | None, d_value: float | None, k_delta: float | None, state: str | None) -> str:
+    relation = "K>D" if k_value is not None and d_value is not None and k_value > d_value else "K<D" if k_value is not None and d_value is not None and k_value < d_value else "K≈D"
+    if state == "과열" or (k_value is not None and k_value >= 80):
+        if relation == "K>D":
+            return "과열권 K>D 유지, 강하지만 꺾이면 눌림"
+        return "과열권에서 K<D, 단기 꺾임 주의"
+    if state == "침체" or (k_value is not None and k_value <= 20):
+        if relation == "K>D":
+            return "침체권 K>D 회복 시도, 반등 확인"
+        return "침체권 K<D, 반등 확인 필요"
+    if k_delta is not None and k_delta < -3:
+        return f"중립권 {relation} 약화"
+    if k_delta is not None and k_delta > 3:
+        return f"중립권 {relation} 개선"
+    return f"중립권 {relation}, 방향 확인"
+
+
+def _ichimoku_interpretation(state: str, spread: float | None = None) -> str:
+    bullish_cross = spread is not None and spread > 0
+    bearish_cross = spread is not None and spread < 0
+    if "위" in state:
+        if bullish_cross:
+            return "중기 상승추세·구름 지지"
+        return "구름 위지만 전환/기준선 확인 필요"
+    if "아래" in state:
+        if bearish_cross:
+            return "중기 하락추세·구름 저항"
+        return "구름 아래, 회복 확인 필요"
+    if bullish_cross:
+        return "구름 안이나 전환선 우위, 돌파 확인"
+    if bearish_cross:
+        return "추세 확인 필요"
+    return "추세 확인 필요"
+
+
+def _bollinger_interpretation(state: str, position: float | None, position_delta: float | None = None, bandwidth_delta: float | None = None) -> str:
+    expanding = (bandwidth_delta is not None and bandwidth_delta > 0) or (position_delta is not None and position_delta > 3)
+    contracting = bandwidth_delta is not None and bandwidth_delta < 0
+    if "상단" in state or (position is not None and position >= 80):
+        if expanding:
+            return "상단 확장, 추격 부담"
+        return "상단권, 추격 부담"
+    if "하단" in state or (position is not None and position <= 20):
+        if expanding:
+            return "하단 이탈 확대, 칼잡기 위험"
+        return "낙폭 확대, 반등 확인 필요"
+    if contracting:
+        return "밴드 수축, 방향성 대기"
+    return "방향성 확인 필요"
+
+
+def _technical_summary(row: dict[str, Any]) -> str:
+    rsi = _to_float(row.get("rsi14"))
+    rsi_delta = _to_float(row.get("rsi14_delta"))
+    macd_hist = _to_float(row.get("macd_histogram"))
+    macd_hist_delta = _to_float(row.get("macd_histogram_delta"))
+    stoch_k = _to_float(row.get("stochastic_k"))
+    stoch_delta = _to_float(row.get("stochastic_k_delta"))
+    bb_position = _to_float(row.get("bollinger_position_pct"))
+    bb_state = str(row.get("bollinger_state") or "")
+
+    trend_positive = (macd_hist is not None and macd_hist > 0) and (rsi is not None and rsi >= 50)
+    trend_negative = (macd_hist is not None and macd_hist < 0) and (rsi is not None and rsi < 50)
+    momentum_improving = sum(
+        1
+        for value in (rsi_delta, macd_hist_delta, stoch_delta)
+        if value is not None and value > 0
+    ) >= 2
+    momentum_weakening = sum(
+        1
+        for value in (rsi_delta, macd_hist_delta, stoch_delta)
+        if value is not None and value < 0
+    ) >= 2
+    overheated = (rsi is not None and rsi >= 75) or (stoch_k is not None and stoch_k >= 80) or (bb_position is not None and bb_position >= 80) or "상단" in bb_state
+    washed_out = (rsi is not None and rsi <= 25) or (stoch_k is not None and stoch_k <= 20) or (bb_position is not None and bb_position <= 20) or "하단" in bb_state
+
+    if trend_positive and momentum_improving and overheated:
+        return "모멘텀 개선 중이나 과열권, 눌림/돌파 확인"
+    if trend_positive and momentum_improving:
+        return "모멘텀 개선 중, 돌파 지속 확인"
+    if trend_positive and momentum_weakening:
+        return "상방은 유지되나 모멘텀 둔화, 추격 자제"
+    if trend_negative and momentum_weakening:
+        return "모멘텀 악화, 반등 확인 전 회피"
+    if momentum_weakening:
+        return "상승은 있지만 모멘텀 둔화, 돌파 확인"
+    if overheated:
+        return "단기 과열 부담, 추격보다 눌림 대기"
+    if washed_out:
+        return "낙폭은 크지만 반등 신호 확인 필요"
+    return "방향성 혼재, 돌파 확인 전 분할/대기"
+
+
+def _technical_suffix(row: dict[str, Any]) -> str:
+    parts: list[str] = []
+
+    rsi = _to_float(row.get("rsi14"))
+    rsi_delta = _to_float(row.get("rsi14_delta"))
+    if rsi is not None:
+        parts.append(f"RSI {rsi:.0f}{_fmt_delta_paren(rsi_delta, 0)}: {_rsi_interpretation(rsi, rsi_delta)}")
+
+    macd_line = _to_float(row.get("macd_line"))
+    macd_signal = _to_float(row.get("macd_signal"))
+    macd_hist = _to_float(row.get("macd_histogram"))
+    macd_hist_delta = _to_float(row.get("macd_histogram_delta"))
+    macd_state = str(row.get("macd_state") or "")
+    if macd_line is not None and macd_signal is not None:
+        hist_text = f" h{_fmt_signed(macd_hist, 2)}{_fmt_delta_paren(macd_hist_delta, 2)}" if macd_hist is not None else ""
+        parts.append(
+            f"MACD {_fmt_indicator_value(macd_line)}/{_fmt_indicator_value(macd_signal)}{hist_text}: "
+            f"{_macd_interpretation(macd_line, macd_signal, macd_hist, macd_hist_delta, macd_state or None)}"
+        )
+    elif macd_state:
+        parts.append(f"MACD {macd_state}: {_macd_interpretation(macd_line, macd_signal, macd_hist, macd_hist_delta, macd_state)}")
+
+    stoch_k = _to_float(row.get("stochastic_k"))
+    stoch_d = _to_float(row.get("stochastic_d"))
+    stoch_k_delta = _to_float(row.get("stochastic_k_delta"))
+    stoch_state = str(row.get("stochastic_state") or "")
+    if stoch_k is not None and stoch_d is not None:
+        parts.append(
+            f"스토캐스틱 Slow {stoch_k:.0f}/{stoch_d:.0f}{_fmt_delta_paren(stoch_k_delta, 0)}: "
+            f"{_stochastic_interpretation(stoch_k, stoch_d, stoch_k_delta, stoch_state or None)}"
+        )
+    elif stoch_state:
+        parts.append(f"스토캐스틱 Slow {stoch_state}: {_stochastic_interpretation(stoch_k, stoch_d, stoch_k_delta, stoch_state)}")
+
+    bb_state = str(row.get("bollinger_state") or "")
+    bb_position = _to_float(row.get("bollinger_position_pct"))
+    bb_position_delta = _to_float(row.get("bollinger_position_delta"))
+    bb_bandwidth_delta = _to_float(row.get("bollinger_bandwidth_delta"))
+    if bb_state:
+        bb_value = f"{bb_position:.0f}%{_fmt_delta_paren(bb_position_delta, 0)} {bb_state}" if bb_position is not None else bb_state
+        parts.append(f"BB {bb_value}: {_bollinger_interpretation(bb_state, bb_position, bb_position_delta, bb_bandwidth_delta)}")
+
+    if parts:
+        parts.append(f"종합: {_technical_summary(row)}")
+    return " — " + "; ".join(parts) if parts else ""
 
 
 def _fmt_trading_value(value: Any) -> str:
@@ -180,16 +520,6 @@ def _classify_regime(quotes: dict[str, dict[str, Any]]) -> dict[str, Any]:
         risk_on_score += 1
         signals.append(f"DXY 약세 {_fmt_pct(dxy_pct)}")
 
-    qqq_pct = _pct_change(quotes.get("QQQ", {}))
-    spy_pct = _pct_change(quotes.get("SPY", {}))
-    if qqq_pct is not None and spy_pct is not None:
-        if qqq_pct < spy_pct - 0.4:
-            risk_off_score += 1
-            signals.append(f"QQQ가 SPY 대비 약세 {qqq_pct - spy_pct:+.2f}%p")
-        elif qqq_pct > spy_pct + 0.4 and risk_off_score <= 1:
-            risk_on_score += 1
-            signals.append(f"QQQ가 SPY 대비 강세 {qqq_pct - spy_pct:+.2f}%p")
-
     if risk_off_score >= 3:
         label = "risk_off"
     elif risk_on_score > risk_off_score and risk_on_score >= 2:
@@ -201,7 +531,7 @@ def _classify_regime(quotes: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {"label": label, "korean_label": _korean_regime_label(label), "risk_off_score": risk_off_score, "risk_on_score": risk_on_score, "signals": signals}
 
 
-def _rank_sector_quotes(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_pct: float) -> list[dict[str, Any]]:
+def _rank_sector_quotes(quotes: dict[str, dict[str, Any]], spy_pct: float) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     names = {**CORE_SECTOR_ETFS, **THEME_ETFS}
     for symbol, name in names.items():
@@ -212,23 +542,21 @@ def _rank_sector_quotes(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
         if pct is None:
             continue
         relative_to_spy = round(pct - spy_pct, 2)
-        relative_to_qqq = round(pct - qqq_pct, 2)
-        score = round(pct + relative_to_spy + (relative_to_qqq * 0.5), 3)
-        rows.append(
-            {
-                "symbol": symbol,
-                "name": name,
-                "pct_change": round(pct, 2),
-                "relative_to_spy_pct": relative_to_spy,
-                "relative_to_qqq_pct": relative_to_qqq,
-                "strength_score": score,
-                "price": quote.get("price"),
-                "volume": _quote_volume(quote),
-                "trading_value": _quote_trading_value(quote),
-                "source": quote.get("source"),
-                "timestamp": quote.get("timestamp") or quote.get("collected_at"),
-            }
-        )
+        score = round(pct + relative_to_spy, 3)
+        row = {
+            "symbol": symbol,
+            "name": name,
+            "pct_change": round(pct, 2),
+            "relative_to_spy_pct": relative_to_spy,
+            "strength_score": score,
+            "price": quote.get("price"),
+            "volume": _quote_volume(quote),
+            "trading_value": _quote_trading_value(quote),
+            "source": quote.get("source"),
+            "timestamp": quote.get("timestamp") or quote.get("collected_at"),
+        }
+        row.update(_display_meta_fields(quote))
+        rows.append(row)
     return sorted(rows, key=lambda row: row["strength_score"], reverse=True)
 
 
@@ -242,7 +570,7 @@ def _median(values: list[float]) -> float | None:
     return (ordered[midpoint - 1] + ordered[midpoint]) / 2
 
 
-def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_pct: float) -> list[dict[str, Any]]:
+def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -> list[dict[str, Any]]:
     baskets: list[dict[str, Any]] = []
     for key, basket in USER_THEME_BASKETS.items():
         symbols = tuple(str(symbol).upper() for symbol in basket.get("symbols", ()))
@@ -260,7 +588,6 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
                 "symbol": symbol,
                 "pct_change": round(pct, 2),
                 "relative_to_spy_pct": round(pct - spy_pct, 2),
-                "relative_to_qqq_pct": round(pct - qqq_pct, 2),
                 "price": quote.get("price"),
                 "volume": _quote_volume(quote),
                 "trading_value": _quote_trading_value(quote),
@@ -268,6 +595,8 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
                 "timestamp": quote.get("timestamp") or quote.get("collected_at"),
                 "score_eligible": symbol not in excluded,
             }
+            row.update(_display_meta_fields(quote))
+            row.update(_technical_fields(quote))
             constituents.append(row)
             if row["score_eligible"]:
                 score_rows.append(row)
@@ -280,9 +609,8 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
         median_pct = _median(pct_values)
         breadth_positive_pct = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100
         avg_relative_to_spy = avg_pct - spy_pct
-        avg_relative_to_qqq = avg_pct - qqq_pct
         breadth_bonus = (breadth_positive_pct - 50.0) / 25.0
-        strength_score = avg_pct + avg_relative_to_spy + (avg_relative_to_qqq * 0.5) + breadth_bonus
+        strength_score = avg_pct + avg_relative_to_spy + breadth_bonus
         leaders = sorted(score_rows, key=lambda row: row["pct_change"], reverse=True)[:3]
         laggards = sorted(score_rows, key=lambda row: row["pct_change"])[:3]
         baskets.append(
@@ -298,7 +626,6 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
                 "median_pct_change": round(float(median_pct), 2) if median_pct is not None else None,
                 "breadth_positive_pct": round(breadth_positive_pct, 1),
                 "relative_to_spy_pct": round(avg_relative_to_spy, 2),
-                "relative_to_qqq_pct": round(avg_relative_to_qqq, 2),
                 "trading_value": round(sum(trading_values), 2) if trading_values else None,
                 "strength_score": round(strength_score, 3),
                 "leaders": leaders,
@@ -308,7 +635,7 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_p
     return sorted(baskets, key=lambda row: row["strength_score"], reverse=True)
 
 
-def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, qqq_pct: float) -> list[dict[str, Any]]:
+def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -> list[dict[str, Any]]:
     baskets: list[dict[str, Any]] = []
     parent_names = {key: str(value.get("name") or key) for key, value in USER_THEME_BASKETS.items()}
     for key, basket in USER_SUB_THEME_BASKETS.items():
@@ -329,7 +656,6 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, q
                 "symbol": symbol,
                 "pct_change": round(pct, 2),
                 "relative_to_spy_pct": round(pct - spy_pct, 2),
-                "relative_to_qqq_pct": round(pct - qqq_pct, 2),
                 "price": quote.get("price"),
                 "volume": _quote_volume(quote),
                 "trading_value": _quote_trading_value(quote),
@@ -337,6 +663,8 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, q
                 "timestamp": quote.get("timestamp") or quote.get("collected_at"),
                 "score_eligible": symbol not in excluded,
             }
+            row.update(_display_meta_fields(quote))
+            row.update(_technical_fields(quote))
             constituents.append(row)
             if row["score_eligible"]:
                 score_rows.append(row)
@@ -349,9 +677,8 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, q
         median_pct = _median(pct_values)
         breadth_positive_pct = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100
         avg_relative_to_spy = avg_pct - spy_pct
-        avg_relative_to_qqq = avg_pct - qqq_pct
         breadth_bonus = (breadth_positive_pct - 50.0) / 25.0
-        strength_score = avg_pct + avg_relative_to_spy + (avg_relative_to_qqq * 0.5) + breadth_bonus
+        strength_score = avg_pct + avg_relative_to_spy + breadth_bonus
         leaders = sorted(score_rows, key=lambda row: row["pct_change"], reverse=True)[:3]
         laggards = sorted(score_rows, key=lambda row: row["pct_change"])[:3]
         baskets.append(
@@ -369,7 +696,6 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float, q
                 "median_pct_change": round(float(median_pct), 2) if median_pct is not None else None,
                 "breadth_positive_pct": round(breadth_positive_pct, 1),
                 "relative_to_spy_pct": round(avg_relative_to_spy, 2),
-                "relative_to_qqq_pct": round(avg_relative_to_qqq, 2),
                 "trading_value": round(sum(trading_values), 2) if trading_values else None,
                 "strength_score": round(strength_score, 3),
                 "leaders": leaders,
@@ -504,31 +830,30 @@ def _rank_watchlist_movers(theme_baskets: list[dict[str, Any]], sub_theme_basket
             if pct is None:
                 continue
             relative_to_spy = _to_float(row.get("relative_to_spy_pct")) or 0.0
-            relative_to_qqq = _to_float(row.get("relative_to_qqq_pct")) or 0.0
-            mover_score = abs(pct) + max(relative_to_spy, 0.0) + max(relative_to_qqq, 0.0) * 0.5
+            mover_score = abs(pct) + max(relative_to_spy, 0.0)
             direction = "강세" if pct >= 0 else "약세"
             symbol = str(row.get("symbol") or "")
             sub_theme = symbol_sub_themes.get(symbol, {})
             sub_theme_name = str(sub_theme.get("name") or "")
             reason = f"{theme_name}>{sub_theme_name} 내부 {direction}" if sub_theme_name else f"{theme_name} 내부 {direction}"
-            movers.append(
-                {
-                    "symbol": symbol,
-                    "theme": theme_name,
-                    "theme_key": theme_key,
-                    "sub_theme": sub_theme_name or None,
-                    "sub_theme_key": sub_theme.get("key"),
-                    "pct_change": round(pct, 2),
-                    "relative_to_spy_pct": round(relative_to_spy, 2),
-                    "relative_to_qqq_pct": round(relative_to_qqq, 2),
-                    "mover_score": round(mover_score, 3),
-                    "direction": direction,
-                    "reason": reason,
-                    "price": row.get("price"),
-                    "source": row.get("source"),
-                    "timestamp": row.get("timestamp"),
-                }
-            )
+            mover = {
+                "symbol": symbol,
+                "theme": theme_name,
+                "theme_key": theme_key,
+                "sub_theme": sub_theme_name or None,
+                "sub_theme_key": sub_theme.get("key"),
+                "pct_change": round(pct, 2),
+                "relative_to_spy_pct": round(relative_to_spy, 2),
+                "mover_score": round(mover_score, 3),
+                "direction": direction,
+                "reason": reason,
+                "price": row.get("price"),
+                "source": row.get("source"),
+                "timestamp": row.get("timestamp"),
+            }
+            mover.update(_display_meta_fields(row))
+            mover.update(_technical_fields(row))
+            movers.append(mover)
     return sorted(movers, key=lambda row: row["mover_score"], reverse=True)
 
 
@@ -538,8 +863,102 @@ def _movers_line(rows: list[dict[str, Any]]) -> str:
     parts = []
     for row in rows[:5]:
         scope = row.get("sub_theme") or row.get("theme")
-        parts.append(f"{row['symbol']} {_fmt_pct(row['pct_change'])}({scope})")
+        meta = _row_price_session_text(row)
+        scope_text = f"{scope}; {meta}" if meta else str(scope)
+        parts.append(f"{row['symbol']} {_fmt_pct(row['pct_change'])}({scope_text}){_technical_suffix(row)}")
     return "오늘 먼저 볼 종목: " + " | ".join(parts)
+
+
+def _theme_leader_status_label(avg_pct: float | None, breadth_positive_pct: float | None) -> str:
+    if avg_pct is None or breadth_positive_pct is None:
+        return "데이터없음"
+    if avg_pct >= 0.5 and breadth_positive_pct >= 60.0:
+        return "주도"
+    if avg_pct <= -0.5 and breadth_positive_pct <= 40.0:
+        return "약함"
+    return "혼조"
+
+
+def _theme_leader_rows_from_quotes(quotes: dict[str, dict[str, Any]], basket: dict[str, Any]) -> list[dict[str, Any]]:
+    symbols = tuple(str(symbol).upper() for symbol in basket.get("symbols", ()))
+    excluded = {str(symbol).upper() for symbol in basket.get("excluded_from_score", ())}
+    rows: list[dict[str, Any]] = []
+    for symbol in symbols:
+        if symbol in excluded:
+            continue
+        quote = quotes.get(symbol)
+        if not quote:
+            continue
+        pct = _pct_change(quote)
+        if pct is None:
+            continue
+        row = {
+            "symbol": symbol,
+            "pct_change": round(pct, 2),
+            "price": quote.get("price"),
+            "source": quote.get("source"),
+            "timestamp": quote.get("timestamp") or quote.get("collected_at"),
+        }
+        row.update(_display_meta_fields(quote))
+        row.update(_technical_fields(quote))
+        rows.append(row)
+    return sorted(rows, key=lambda row: row["pct_change"], reverse=True)
+
+
+def _theme_leader_status_line(quotes: dict[str, dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for _key, basket in USER_THEME_BASKETS.items():
+        theme_name = str(basket.get("name") or _key)
+        rows = _theme_leader_rows_from_quotes(quotes, basket)
+        if not rows:
+            parts.append(f"{theme_name}: n/a n/a 가격 n/a, 데이터없음")
+            continue
+        pct_values = [float(row["pct_change"]) for row in rows]
+        avg_pct = sum(pct_values) / len(pct_values) if pct_values else None
+        breadth = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100 if pct_values else None
+        leader = rows[0]
+        meta = _row_price_session_text(leader) or "가격 n/a"
+        status = _theme_leader_status_label(avg_pct, breadth)
+        technical = _technical_suffix(leader)
+        parts.append(f"{theme_name}: {leader['symbol']} {_fmt_pct(leader['pct_change'])} {meta}, {status}{technical}")
+    return "테마별 대장주: " + " | ".join(parts)
+
+
+def _theme_symbol_universe() -> set[str]:
+    symbols: set[str] = set()
+    for basket in USER_THEME_BASKETS.values():
+        excluded = {str(symbol).upper() for symbol in basket.get("excluded_from_score", ())}
+        for symbol in basket.get("symbols", ()):
+            upper = str(symbol).upper()
+            if upper not in excluded:
+                symbols.add(upper)
+    return symbols
+
+
+def _current_strength_against_previous_close_line(quotes: dict[str, dict[str, Any]], limit: int = 5) -> str:
+    theme_symbols = _theme_symbol_universe()
+    rows: list[dict[str, Any]] = []
+    for symbol in sorted(theme_symbols):
+        quote = quotes.get(symbol)
+        if not quote:
+            continue
+        price = _to_float(quote.get("price") or quote.get("last") or quote.get("last_price") or quote.get("regularMarketPrice"))
+        previous = _to_float(quote.get("previous_close") or quote.get("previousClose") or quote.get("regularMarketPreviousClose"))
+        pct = _pct_change(quote)
+        if price is None or previous in (None, 0) or pct is None or pct <= 0:
+            continue
+        rows.append({
+            "symbol": symbol,
+            "price": price,
+            "pct_change": pct,
+            "source": quote.get("price_source") or quote.get("source"),
+        })
+    rows.sort(key=lambda row: row["pct_change"], reverse=True)
+    if not rows:
+        return "전일종가 대비 현재 강세: 데이터 부족 / 기준 전일 정규장 종가 대비 현재가 / 출처 Yahoo chart 1m includePrePost"
+    parts = [f"{row['symbol']} {_fmt_pct(row['pct_change'])} 가격 {_fmt_price(row['price'])}" for row in rows[:limit]]
+    source = "Yahoo chart 1m includePrePost"
+    return f"전일종가 대비 현재 강세: {' | '.join(parts)} / 기준 전일 정규장 종가 대비 현재가 / 출처 {source}"
 
 
 def _etf_context_line(strong: list[dict[str, Any]], weak: list[dict[str, Any]]) -> str:
@@ -554,28 +973,65 @@ def _etf_context_line(strong: list[dict[str, Any]], weak: list[dict[str, Any]]) 
     return f"ETF 시장 참고: {strong_part} / {weak_part}"
 
 
+_DISPLAY_BENCHMARKS = (
+    ("^IXIC", "NASDAQ"),
+    ("SPY", "SPY"),
+    ("SOXX", "SOXX"),
+    ("BTC-USD", "BTCUSDT"),
+    ("CL=F", "WTI"),
+    ("^VIX", "VIX"),
+)
+
+
+def _benchmark_snapshot(normalized: dict[str, dict[str, Any]]) -> dict[str, float]:
+    snapshot: dict[str, float] = {}
+    for symbol, display in _DISPLAY_BENCHMARKS:
+        pct = _pct_change(normalized.get(symbol, {}))
+        if pct is not None:
+            snapshot[display] = round(float(pct), 2)
+    return snapshot
+
+
+def _benchmark_context_line(normalized: dict[str, dict[str, Any]], collected_at: str) -> str:
+    parts = []
+    for symbol, display in _DISPLAY_BENCHMARKS:
+        pct = _pct_change(normalized.get(symbol, {}))
+        # Keep the benchmark label set stable in Telegram alerts even when a
+        # quote provider temporarily misses one symbol, especially ^IXIC on
+        # Windows/Yahoo. The value is explicit n/a rather than silently
+        # dropping NASDAQ and making the whole benchmark line disappear.
+        parts.append(f"{display} {_fmt_pct(pct) if pct is not None else 'n/a'}")
+    context = " / ".join(parts) if parts else "데이터 부족"
+    session = _quote_session_label(normalized.get("SPY", {}))
+    stale = normalized.get("SPY", {}).get("stale_note") if normalized.get("SPY", {}).get("is_stale_regular_close") else None
+    suffix = f" / 세션 {session}" if not stale else f" / 세션 {session} / {stale}"
+    return f"장 분위기: {context}{suffix} / 기준시각 {collected_at}"
+
+
 def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | None = None, top_n: int = 3) -> dict[str, Any]:
     normalized = {str(symbol).upper(): _normalize_quote(str(symbol), raw) for symbol, raw in (quotes or {}).items()}
     collected_at = collected_at or next((str(q.get("timestamp") or q.get("collected_at")) for q in normalized.values() if q.get("timestamp") or q.get("collected_at")), None) or datetime.now(timezone.utc).isoformat()
 
     spy_pct = _pct_change(normalized.get("SPY", {}))
-    qqq_pct = _pct_change(normalized.get("QQQ", {}))
-    if spy_pct is None or qqq_pct is None:
+    if spy_pct is None:
         return {
             "available": False,
-            "summary": "섹터 강약: SPY/QQQ 기준 데이터가 부족합니다",
+            "summary": "섹터 강약: SPY 기준 데이터가 부족합니다",
             "collected_at": collected_at,
-            "focus_lines": ["섹터 강약: SPY/QQQ 기준 데이터가 부족합니다"],
-            "next_actions": ["SPY/QQQ와 주요 섹터 ETF quote가 들어오는지 먼저 확인"],
+            "focus_lines": [
+                "섹터 강약: SPY 기준 데이터가 부족합니다",
+                _theme_leader_status_line(normalized),
+            ],
+            "next_actions": ["SPY와 주요 섹터/테마 quote가 들어오는지 먼저 확인"],
             "strong": [],
             "weak": [],
             "regime": {"label": "unavailable", "korean_label": "데이터 부족", "signals": []},
             "quotes": normalized,
         }
 
-    ranked = _rank_sector_quotes(normalized, spy_pct, qqq_pct)
-    theme_baskets = _rank_theme_baskets(normalized, spy_pct, qqq_pct)
-    sub_theme_baskets = _rank_sub_theme_baskets(normalized, spy_pct, qqq_pct)
+    ranked = _rank_sector_quotes(normalized, spy_pct)
+    theme_baskets = _rank_theme_baskets(normalized, spy_pct)
+    sub_theme_baskets = _rank_sub_theme_baskets(normalized, spy_pct)
     watchlist_movers = _rank_watchlist_movers(theme_baskets, sub_theme_baskets)
     strong = ranked[:top_n]
     weak = sorted(ranked, key=lambda row: row["strength_score"])[:top_n]
@@ -593,19 +1049,22 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
         laggard = f"{weak_sub_themes[0]['parent_name']} > {weak_sub_themes[0]['name']}"
     summary_prefix = "장중 테마 강약" if theme_baskets else "장중 섹터 강약"
     focus_lines = [
-        f"시장 레짐: {regime_text} / {'; '.join(regime['signals'][:3])}",
+        f"장 분위기: {regime_text} / {'; '.join(regime['signals'][:3])}",
         _theme_line_for("강한 테마", strong_themes),
         _theme_line_for("약한 테마", weak_themes),
         _sub_theme_line_for("강한 세부테마", strong_sub_themes),
         _sub_theme_line_for("약한 세부테마", weak_sub_themes),
         _rotation_line(rotation_alerts),
+        _theme_leader_status_line(normalized),
+        _current_strength_against_previous_close_line(normalized),
         _movers_line(watchlist_movers),
         _etf_context_line(strong, weak),
-        f"벤치마크: SPY {_fmt_pct(spy_pct)} / QQQ {_fmt_pct(qqq_pct)} / 기준시각 {collected_at}",
+        _session_context_line(normalized),
+        _benchmark_context_line(normalized, collected_at),
     ]
     next_actions = [
-        "강한 테마가 SPY/QQQ 대비 계속 우위인지 5분 뒤 재확인",
-        "약한 테마 반등 매수는 VIX와 QQQ 회복 확인 후 판단",
+        "강한 테마가 SPY 대비 계속 우위인지 5분 뒤 재확인",
+        "약한 테마 반등 매수는 VIX 안정과 SPY 회복 확인 후 판단",
     ]
     if rotation_alerts:
         top_rotation = rotation_alerts[0]
@@ -620,9 +1079,9 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
 
     return {
         "available": True,
-        "summary": f"{summary_prefix}: {leader} 주도 / {laggard} 약세 / 레짐 {regime_text}",
+        "summary": f"{summary_prefix}: {leader} 주도 / {laggard} 약세 / 장 분위기 {regime_text}",
         "collected_at": collected_at,
-        "benchmarks": {"SPY": spy_pct, "QQQ": qqq_pct},
+        "benchmarks": _benchmark_snapshot(normalized),
         "strong": strong,
         "weak": weak,
         "theme_baskets": theme_baskets,
@@ -800,10 +1259,9 @@ def build_market_regime_report(quotes: dict[str, Any], collected_at: str | None 
     regime = report.get("regime") or {"label": "unavailable", "korean_label": "데이터 부족", "signals": []}
     label = str(regime.get("korean_label") or regime.get("label") or "데이터 부족")
     signals = [str(signal) for signal in regime.get("signals", [])]
-    benchmark_line = "벤치마크: 데이터 부족"
+    benchmark_line = "장 분위기: 데이터 부족"
     if report.get("available"):
-        benchmarks = report.get("benchmarks") or {}
-        benchmark_line = f"벤치마크: SPY {_fmt_pct(benchmarks.get('SPY'))} / QQQ {_fmt_pct(benchmarks.get('QQQ'))} / 기준시각 {report.get('collected_at')}"
+        benchmark_line = _benchmark_context_line(report.get("quotes") or {}, str(report.get("collected_at") or collected_at or ""))
     if regime.get("label") == "risk_off":
         action = "리스크오프: 고베타/성장주 추격매수 낮추고 손절선 짧게"
     elif regime.get("label") == "risk_on":
@@ -842,19 +1300,19 @@ def build_market_regime_report(quotes: dict[str, Any], collected_at: str | None 
     }
     return {
         "available": bool(report.get("available")),
-        "summary": f"시장 레짐: {label}",
+        "summary": f"장 분위기: {label}",
         "collected_at": report.get("collected_at"),
         "regime": regime,
         "focus_lines": [
             f"오늘 매매 난이도: {difficulty['label']} / {difficulty['reason']} / stress {total_stress}",
-            f"시장 레짐: {label} / {'; '.join(signals[:4]) if signals else '신호 부족'}",
+            f"장 분위기: {label} / {'; '.join(signals[:4]) if signals else '신호 부족'}",
             benchmark_line,
             *oil_vix["focus_lines"][:3],
             f"해석: {action}",
         ],
         "next_actions": [
             action,
-            "레짐이 명확하지 않으면 SPY/QQQ/IWM과 주도 테마 상승비율을 5분 뒤 재확인",
+            "장 분위기가 명확하지 않으면 SPY와 주도 테마 상승비율을 5분 뒤 재확인",
         ],
         "source_report": report,
         "oil_vix": oil_vix,
@@ -865,13 +1323,14 @@ def build_market_regime_report(quotes: dict[str, Any], collected_at: str | None 
 
 def fetch_sector_strength_quotes(symbols: tuple[str, ...] | list[str] | None = None) -> dict[str, dict[str, Any]]:
     try:
-        from .yfinance_data import fetch_yahoo_chart_quote_pack, fetch_yfinance_quote_pack
+        from .yfinance_data import fetch_toss_wts_quote_packs, fetch_yahoo_chart_quote_pack, fetch_yfinance_quote_pack
     except ImportError:  # direct script execution via src/main.py
-        from yfinance_data import fetch_yahoo_chart_quote_pack, fetch_yfinance_quote_pack
+        from yfinance_data import fetch_toss_wts_quote_packs, fetch_yahoo_chart_quote_pack, fetch_yfinance_quote_pack
 
     selected = tuple(symbols or DEFAULT_SECTOR_STRENGTH_SYMBOLS)
-    quotes: dict[str, dict[str, Any]] = {}
-    for symbol in selected:
+    toss_packs = fetch_toss_wts_quote_packs(selected) if os.getenv("SECTOR_STRENGTH_ENABLE_TOSS_WTS", "1") != "0" else {}
+
+    def fetch_one(symbol: str) -> tuple[str, dict[str, Any]]:
         pack = fetch_yahoo_chart_quote_pack(symbol)
         if not (isinstance(pack, dict) and pack.get("available")):
             fallback_pack = fetch_yfinance_quote_pack(symbol)
@@ -889,5 +1348,39 @@ def fetch_sector_strength_quotes(symbols: tuple[str, ...] | list[str] | None = N
             quote["warning"] = pack.get("warning")
         if pack.get("warnings") if isinstance(pack, dict) else False:
             quote["warnings"] = pack.get("warnings")
-        quotes[symbol] = quote
-    return quotes
+
+        toss_pack = toss_packs.get(symbol) if isinstance(toss_packs, dict) else None
+        if isinstance(toss_pack, dict) and toss_pack.get("available") and isinstance(toss_pack.get("quote"), dict):
+            yahoo_technical_fields = _technical_fields(quote)
+            yahoo_timestamp = quote.get("timestamp")
+            yahoo_source = quote.get("source")
+            quote.update(toss_pack["quote"])
+            quote.update(yahoo_technical_fields)
+            quote["symbol"] = symbol
+            quote["source"] = "toss_wts_stock_prices"
+            quote["timestamp"] = toss_pack.get("collected_at")
+            quote["technical_source"] = yahoo_source
+            quote["technical_timestamp"] = yahoo_timestamp
+            quote["available"] = True
+        else:
+            session_label = _quote_session_label(quote)
+            if _session_needs_live_price(session_label) and quote.get("is_stale_regular_close"):
+                quote["session_label"] = session_label
+                quote["stale_note"] = quote.get("stale_note") or "정규장 종가 기준(확장/주간거래 실시간가 미확인)"
+                quote["pct_change_basis"] = "정규장 종가 기준"
+        return symbol, quote
+
+    max_workers = max(1, int(os.getenv("SECTOR_STRENGTH_QUOTE_WORKERS", "16")))
+    max_workers = min(max_workers, max(1, len(selected)))
+    quotes: dict[str, dict[str, Any]] = {}
+    if max_workers == 1:
+        for symbol in selected:
+            key, quote = fetch_one(symbol)
+            quotes[key] = quote
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = [executor.submit(fetch_one, symbol) for symbol in selected]
+            for future in as_completed(futures):
+                key, quote = future.result()
+                quotes[key] = quote
+    return {symbol: quotes[symbol] for symbol in selected if symbol in quotes}

@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import re
 import sys
 import time
 from dataclasses import replace
@@ -60,7 +61,7 @@ def build_oil_vix_response() -> dict[str, Any]:
 
 
 def build_market_regime_response() -> dict[str, Any]:
-    return build_response('{"mode":"market_regime","request":"시장 레짐 급변 감시 알림"}')
+    return build_response('{"mode":"market_regime","request":"장 분위기 급변 감시 알림"}')
 
 
 def response_builder_for_mode(mode: str) -> ResponseBuilder:
@@ -76,13 +77,12 @@ def _select_alert_focus_lines(focus: Any, max_items: int = 7) -> list[str]:
         return []
     cleaned = [str(item).strip() for item in focus if str(item).strip()]
     priority_prefixes = (
-        "시장 레짐:",
+        "장 분위기:",
         "강한 테마:",
         "약한 테마:",
         "로테이션 해석:",
         "오늘 먼저 볼 종목:",
         "ETF 시장 참고:",
-        "벤치마크:",
     )
     selected: list[str] = []
     seen: set[str] = set()
@@ -101,7 +101,280 @@ def _select_alert_focus_lines(focus: Any, max_items: int = 7) -> list[str]:
     return selected[:max_items]
 
 
+def _clean_focus_lines(focus: Any) -> list[str]:
+    if not isinstance(focus, list):
+        return []
+    return [str(item).strip() for item in focus if str(item).strip()]
+
+
+def _strip_focus_prefix(text: str, prefix: str) -> str:
+    return text[len(prefix):].strip() if text.startswith(prefix) else text.strip()
+
+
+def _focus_line(lines: list[str], prefix: str, contains: str | None = None, last: bool = False) -> str:
+    iterable = reversed(lines) if last else iter(lines)
+    for text in iterable:
+        if not text.startswith(prefix):
+            continue
+        if contains and contains not in text:
+            continue
+        return _strip_focus_prefix(text, prefix)
+    return ""
+
+
+def _split_focus_parts(text: str, max_items: int) -> list[str]:
+    if not text:
+        return []
+    parts = [part.strip() for part in text.split("|") if part.strip()]
+    return parts[:max_items]
+
+
+def _payload_collected_at(payload: dict[str, Any]) -> str | None:
+    direct = payload.get("collected_at")
+    if direct:
+        return str(direct)
+    data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+    if not isinstance(data, dict):
+        return None
+    for key in ("sector_strength", "oil_vix", "market_regime"):
+        section = data.get(key)
+        if isinstance(section, dict) and section.get("collected_at"):
+            return str(section.get("collected_at"))
+    return None
+
+
+def _alert_time_label(payload: dict[str, Any]) -> str:
+    raw = _payload_collected_at(payload)
+    dt: datetime | None = None
+    if raw:
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except Exception:
+            dt = None
+    dt = _to_utc(dt or _now_utc())
+    if ZoneInfo is None:
+        return dt.strftime("%H:%M UTC")
+    kst = dt.astimezone(ZoneInfo("Asia/Seoul"))
+    et = dt.astimezone(ZoneInfo("America/New_York"))
+    return f"{kst:%H:%M} KST / {et:%H:%M} ET"
+
+
+def _sector_mood_label(text: str) -> str:
+    label = text.split("/", 1)[0].strip()
+    return label or "중립"
+
+
+def _sector_mood_lines(focus_lines: list[str]) -> list[str]:
+    benchmark = _focus_line(focus_lines, "장 분위기:", contains="NASDAQ", last=True)
+    benchmark = benchmark.split(" / 기준시각", 1)[0].strip()
+    mood = ""
+    for text in focus_lines:
+        if text.startswith("장 분위기:") and "NASDAQ" not in text:
+            mood = _sector_mood_label(_strip_focus_prefix(text, "장 분위기:"))
+            break
+    etf = _focus_line(focus_lines, "ETF 시장 참고:")
+    session = _focus_line(focus_lines, "세션:")
+    lines: list[str] = []
+    if mood:
+        lines.append(f"- 상태: {mood}")
+    if session:
+        lines.append(f"- 세션: {session}")
+    if benchmark:
+        lines.append(f"- 벤치: {benchmark}")
+    if etf:
+        lines.append(f"- 참고: ETF 시장 참고: {etf}")
+    return lines or ["데이터 부족"]
+
+
+
+def _short_theme_label(name: str) -> str:
+    if "우주" in name:
+        return "우주"
+    if "암호화" in name or "코인" in name:
+        return "코인"
+    if "원전" in name or "우라늄" in name or "전력" in name or "에너지" in name:
+        return "원전"
+    if "반도체" in name:
+        return "반도체"
+    if "AI" in name or "빅테크" in name or "인프라" in name:
+        return "AI"
+    if "양자" in name:
+        return "양자"
+    if "헬스" in name or "GLP" in name:
+        return "헬스"
+    return name.split("/", 1)[0].strip() or name.strip()
+
+
+def _indicator_head(details: str, label: str) -> str:
+    if label == "스토캐스틱 Slow":
+        pattern = r"스토캐스틱 Slow\s+([^:;]+)"
+    else:
+        pattern = rf"{re.escape(label)}\s+([^:;]+)"
+    match = re.search(pattern, details)
+    return match.group(1).strip() if match else "n/a"
+
+
+def _compact_theme_leader(item: str) -> str:
+    text = item.strip()
+    if not text:
+        return text
+    lead, sep, details = text.partition(" — ")
+    theme, colon, rest = lead.partition(":")
+    if not colon:
+        base = lead.strip()
+        theme_label = ""
+    else:
+        theme_label = _short_theme_label(theme.strip())
+        rest_head = rest.split(",", 1)[0].strip()
+        rest_head = re.sub(r"\b가격\s+([^,\s]+)", r"$\1", rest_head)
+        base = f"{theme_label}: {rest_head}"
+    if not sep:
+        return base or text
+    rsi = _indicator_head(details, "RSI")
+    macd = _indicator_head(details, "MACD")
+    stoch = _indicator_head(details, "스토캐스틱 Slow")
+    bb = _indicator_head(details, "BB")
+    return f"{base} | RSI {rsi}, MACD {macd}, 스토캐스틱 Slow {stoch}, BB {bb}"
+
+def _format_mover_lines(movers: list[str]) -> list[str]:
+    if not movers:
+        return ["데이터 부족"]
+    lines: list[str] = []
+    for item in movers:
+        text = item.strip()
+        if not text:
+            continue
+        if " — " not in text:
+            lines.append(f"• {text}")
+            continue
+        lead, details = text.split(" — ", 1)
+        lines.append(f"• {lead.strip()}")
+        clauses = [part.strip() for part in details.split(";") if part.strip()]
+        for clause in clauses:
+            lines.append(f"  · {clause}")
+    return lines or ["데이터 부족"]
+
+
+def _format_rotation_lines(rotation: str) -> list[str]:
+    text = rotation.strip()
+    if not text:
+        return ["데이터 부족"]
+    parts = [part.strip() for part in text.split(" / ") if part.strip()]
+    if len(parts) >= 2:
+        return [f"• {part}" for part in parts[:2]]
+    return [f"• {text}"]
+
+
+def _format_previous_close_strength_lines(line: str) -> list[str]:
+    text = _strip_focus_prefix(line, "전일종가 대비 현재 강세:")
+    if not text:
+        return []
+    body = text
+    for marker in (" / 기준 ", " / 출처 "):
+        body = body.split(marker, 1)[0].strip()
+    items = [item.strip() for item in body.split(" | ") if item.strip()]
+    lines = ["전일종가 대비 현재 강세", "기준: 전일 정규장 종가 대비 현재가 / Yahoo chart 1m"]
+    for item in items[:3]:
+        compact = item.replace(", 기준 전일 정규장 종가 대비 현재가", "")
+        compact = compact.replace(", 출처 Yahoo chart 1m includePrePost", "")
+        lines.append(f"• {compact}")
+    return lines
+
+
+def _build_sector_telegram_text(payload: dict[str, Any]) -> str:
+    focus_lines = _clean_focus_lines(payload.get("focus") or [])
+    summary = str(payload.get("summary") or "장중 테마 강약").strip()
+    strong = _split_focus_parts(_focus_line(focus_lines, "강한 테마:"), 3)
+    weak = _split_focus_parts(_focus_line(focus_lines, "약한 테마:"), 2)
+    theme_leaders = _split_focus_parts(_focus_line(focus_lines, "테마별 대장주:"), 20)
+    movers = _split_focus_parts(_focus_line(focus_lines, "오늘 먼저 볼 종목:"), 5)
+    previous_close_strength = _focus_line(focus_lines, "전일종가 대비 현재 강세:")
+    rotation = _focus_line(focus_lines, "로테이션 해석:") or "뚜렷한 세부테마 내부 로테이션 없음"
+    actions = [str(item).strip() for item in (payload.get("next_actions") or []) if str(item).strip()]
+    limit = min(1200, TELEGRAM_TEXT_LIMIT)
+
+    def render(selected_movers: list[str], selected_theme_leaders: list[str] | None = None) -> str:
+        rendered_theme_leaders = selected_theme_leaders if selected_theme_leaders is not None else theme_leaders
+        lines = [
+            f"[5분 테마 알림 | {_alert_time_label(payload)}]",
+            "",
+            "1) 장 분위기",
+        ]
+        lines.extend(_sector_mood_lines(focus_lines))
+        lines.extend([
+            "",
+            "2) 강한 테마",
+        ])
+        display_strong = strong[:2] if theme_leaders else strong
+        display_weak = weak[:1] if theme_leaders else weak
+        lines.extend(f"• {item}" for item in (display_strong or ["데이터 부족"]))
+        lines.extend(["", "3) 약한 테마"])
+        lines.extend(f"• {item}" for item in (display_weak or ["데이터 부족"]))
+        lines.extend([
+            "",
+            "4) 주도 종목",
+        ])
+        if rendered_theme_leaders:
+            lines.append("테마별 대장주:")
+            lines.extend(f"• {item}" for item in rendered_theme_leaders)
+        else:
+            lines.extend(_format_mover_lines(selected_movers))
+        if previous_close_strength:
+            lines.extend(_format_previous_close_strength_lines(previous_close_strength))
+        lines.extend([
+            "",
+            "5) 로테이션",
+        ])
+        lines.extend(_format_rotation_lines(rotation))
+        lines.extend([
+            "",
+            "6) 매매 관점",
+            " / ".join(actions[:2]) if actions else "추격보다 5분 뒤 SPY·주도테마 재확인 후 눌림/분할",
+            "",
+            f"한줄 판단: {summary}",
+        ])
+        return "\n".join(lines).strip()
+
+    initial_theme_leaders = [_compact_theme_leader(item) for item in theme_leaders[:7]] if theme_leaders else None
+    text = render([] if theme_leaders else movers, initial_theme_leaders)
+    if len(text) <= limit:
+        return text
+
+    if theme_leaders:
+        compact_theme_leaders = [_compact_theme_leader(item) for item in theme_leaders[:7]]
+        text = render([], compact_theme_leaders)
+        if len(text) <= limit:
+            return text
+
+    # Analysis-style mover lines are intentionally more verbose. Prefer fewer
+    # leading stocks over cutting off sections with a `[truncated]` marker.
+    for count in range(min(len(movers), 4), 0, -1):
+        text = render(movers[:count])
+        if len(text) <= limit:
+            return text
+
+    if movers:
+        first = movers[0]
+        if len(first) > 420:
+            first = first[:417].rstrip() + "..."
+        text = render([first])
+    if len(text) <= limit:
+        return text
+    if theme_leaders:
+        ultra_compact = []
+        for item in theme_leaders[:7]:
+            compact = _compact_theme_leader(item)
+            if len(compact) > 135:
+                compact = compact[:132].rstrip() + "..."
+            ultra_compact.append(compact)
+        text = render([], ultra_compact)
+    return text if len(text) <= limit else text[:limit].rsplit("\n", 1)[0].rstrip()
+
+
 def build_alert_text(payload: dict[str, Any]) -> str:
+    if payload.get("mode") not in ("oil_vix", "market_regime"):
+        return _build_sector_telegram_text(payload)
+
     lines: list[str] = []
     summary = str(payload.get("summary") or "장중 섹터 강약").strip()
     if payload.get("mode") == "oil_vix":

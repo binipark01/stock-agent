@@ -29,36 +29,127 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         trigger_args = parser.parse_args(["--mode", "oil_vix", "--trigger-only"])
         self.assertTrue(trigger_args.trigger_only)
 
-    def test_build_alert_text_is_concise_and_includes_top_sector_and_regime(self) -> None:
+    def test_build_alert_text_uses_readable_six_part_telegram_template(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
 
         payload = {
-            "summary": "장중 테마 강약: 우주/항공우주 주도 / 암호화 약세 / 레짐 중립",
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 우주/항공우주 주도 / 암호화 약세 / 장 분위기 중립",
+            "collected_at": "2026-05-07T13:35:00+00:00",
             "focus": [
-                "시장 레짐: 중립",
-                "강한 테마: 우주/항공우주 평균 +2.00% / 상승비율 80.0% / 주도 RKLB +4.00%",
-                "약한 테마: 암호화/코인 관련주 평균 -2.00% / 상승비율 20.0% / 주도 COIN -1.00%",
-                "오늘 먼저 볼 종목: RKLB +4.00%(우주/항공우주)",
+                "장 분위기: 중립 / VIX/오일/금리/DXY 뚜렷한 충격 없음",
+                "강한 테마: 우주/항공우주 평균 +2.00% / 상승비율 80.0% / 주도 RKLB +4.00% | 반도체/AI칩 평균 +1.20% / 상승비율 66.7% / 주도 MU +3.10%",
+                "약한 테마: 암호화/코인 관련주 평균 -2.00% / 상승비율 20.0% / 주도 COIN -1.00% | 양자/차세대컴퓨팅 평균 -1.10% / 상승비율 25.0% / 주도 IONQ -0.50%",
+                "오늘 먼저 볼 종목: RKLB +4.00%(우주/항공우주) — RSI 64(+5): 50선 위에서 재가속, 매수세 회복; MACD 0.72/0.41 hist +0.31(+0.09): 신호선 위·히스토그램 확대, 상승 모멘텀 강화; Stoch 88/82(+4): 과열권 K>D 유지, 강하지만 꺾이면 눌림; 구름 위 +3.3%, 전환선>기준선: 중기 상승추세·구름 지지; BB 92%(+8) 상단권: 상단 확장, 추격 부담; 종합: 추세·모멘텀 개선 중이나 과열권, 눌림/돌파 확인 | MU +3.10%(메모리/스토리지) — RSI 58(-3): 50선 위지만 탄력 둔화; MACD -0.12/-0.04 hist -0.08(-0.03): 신호선 아래·히스토그램 악화; Stoch 51/49(-6): 중립권 K>D 약화; 구름 안 -0.2%, 전환선<기준선: 추세 확인 필요; BB 49% 중립: 방향성 확인 필요; 종합: 상승은 있지만 모멘텀 둔화, 돌파 확인",
+                "로테이션 해석: 우주 내부 발사체로 자금 이동 / 위성 약세",
                 "ETF 시장 참고: 강세 XLK +2.00% / 약세 XLU -2.00%",
+                "장 분위기: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20% / 기준시각 2026-05-07T13:35:00+00:00",
             ],
-            "next_actions": ["고베타 신규진입은 QQQ/SPY 회복 확인"],
+            "next_actions": ["고베타 신규진입은 SPY 회복 확인"],
         }
 
         text = build_alert_text(payload)
 
-        self.assertIn("장중 테마 강약", text)
+        self.assertTrue(text.startswith("[5분 테마 알림 | 22:35 KST / 09:35 ET]"))
+        for heading in ("1) 장 분위기", "2) 강한 테마", "3) 약한 테마", "4) 주도 종목", "5) 로테이션", "6) 매매 관점", "한줄 판단:"):
+            self.assertIn(heading, text)
+        self.assertNotIn("[Sector Strength Alert]", text)
+        self.assertNotIn("[액션]", text)
         self.assertIn("RKLB", text)
-        self.assertIn("ETF 시장 참고", text)
+        self.assertIn("RSI 64(+5): 50선 위에서 재가속", text)
+        self.assertIn("MACD 0.72/0.41 hist +0.31(+0.09): 신호선 위·히스토그램 확대", text)
+        self.assertIn("Stoch 88/82(+4): 과열권 K>D 유지", text)
+        self.assertIn("구름 위 +3.3%, 전환선>기준선", text)
+        self.assertIn("BB 92%(+8) 상단권: 상단 확장", text)
+        self.assertIn("종합: 추세·모멘텀 개선 중", text)
+        self.assertIn("NASDAQ", text)
         self.assertIn("고베타", text)
+        self.assertIn("- 상태: 중립", text)
+        self.assertIn("- 벤치: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20%", text)
+        self.assertIn("• RKLB +4.00%(우주/항공우주)", text)
+        self.assertIn("  · RSI 64(+5): 50선 위에서 재가속", text)
+        self.assertIn("  · MACD 0.72/0.41 hist +0.31(+0.09): 신호선 위·히스토그램 확대", text)
+        self.assertIn("  · 종합: 추세·모멘텀 개선 중", text)
+        self.assertNotIn(" | MU +3.10%", text)
+        self.assertNotIn("QQQ", text)
+        self.assertNotIn("DXY", text)
+        self.assertNotIn("금리", text)
+        self.assertNotIn("[truncated]", text)
+        self.assertLessEqual(len(text), 1200)
+
+    def test_build_alert_text_formats_long_movers_as_mobile_friendly_bullets(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_text
+
+        payload = {
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 우주/항공우주 주도 / 장 분위기 중립",
+            "collected_at": "2026-05-07T13:35:00+00:00",
+            "focus": [
+                "장 분위기: 중립 / VIX/오일/금리/DXY 뚜렷한 충격 없음",
+                "강한 테마: 우주/항공우주 평균 +2.00% / 상승비율 80.0% / 주도 RKLB +4.00%",
+                "약한 테마: 암호화/코인 관련주 평균 -2.00% / 상승비율 20.0% / 주도 COIN -1.00%",
+                "오늘 먼저 볼 종목: RKLB +4.00%(우주/항공우주) — RSI 64(+5): 50선 위에서 재가속, 매수세 회복; MACD 0.72/0.41 hist +0.31(+0.09): 신호선 위·히스토그램 확대, 상승 모멘텀 강화; Stoch 88/82(+4): 과열권 K>D 유지, 강하지만 꺾이면 눌림; 구름 위 +3.3%, 전환선>기준선: 중기 상승추세·구름 지지; BB 92%(+8) 상단권: 상단 확장, 추격 부담; 종합: 추세·모멘텀 개선 중이나 과열권, 눌림/돌파 확인",
+                "로테이션 해석: 우주 내부 발사체로 자금 이동 / 위성 약세",
+                "ETF 시장 참고: 강세 XLK +2.00% / 약세 XLU -2.00%",
+                "장 분위기: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20% / 기준시각 2026-05-07T13:35:00+00:00",
+            ],
+            "next_actions": ["고베타 신규진입은 SPY 회복 확인"],
+        }
+
+        text = build_alert_text(payload)
+
+        self.assertIn("1) 장 분위기\n- 상태: 중립\n- 벤치:", text)
+        self.assertIn("4) 주도 종목\n• RKLB +4.00%(우주/항공우주)", text)
+        self.assertIn("\n  · RSI 64(+5): 50선 위에서 재가속", text)
+        self.assertIn("\n  · MACD 0.72/0.41 hist +0.31(+0.09): 신호선 위·히스토그램 확대", text)
+        self.assertIn("\n  · Stoch 88/82(+4): 과열권 K>D 유지", text)
+        self.assertIn("\n  · 구름 위 +3.3%, 전환선>기준선", text)
+        self.assertIn("\n  · BB 92%(+8) 상단권", text)
+        self.assertIn("\n  · 종합: 추세·모멘텀 개선 중", text)
+        self.assertIn("5) 로테이션\n• 우주 내부 발사체로 자금 이동\n• 위성 약세", text)
+        self.assertNotIn("DXY", text)
+        self.assertNotIn("금리", text)
+        self.assertLessEqual(len(text), 1200)
+
+    def test_build_alert_text_reduces_verbose_movers_instead_of_cutting_sections(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_text
+
+        verbose = " — RSI 64: 상승 탄력 양호; MACD 0.72/0.41: 상방 추세; Stoch 88/82: 단기 과열; 구름 위: 중기 추세 우위; BB 92% 상단권: 추격 부담; 종합: 추세는 강하지만 단기 과열, 눌림 확인"
+        movers = " | ".join(f"M{i} +{i}.00%(테마){verbose}" for i in range(1, 6))
+        payload = {
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 우주/항공우주 주도 / 장 분위기 중립",
+            "collected_at": "2026-05-07T13:35:00+00:00",
+            "focus": [
+                "장 분위기: 중립 / VIX/오일/금리/DXY 뚜렷한 충격 없음",
+                "강한 테마: 우주/항공우주 평균 +2.00% / 상승비율 80.0% / 주도 RKLB +4.00%",
+                "약한 테마: 암호화/코인 관련주 평균 -2.00% / 상승비율 20.0% / 주도 COIN -1.00%",
+                f"오늘 먼저 볼 종목: {movers}",
+                "로테이션 해석: 우주 내부 발사체로 자금 이동 / 위성 약세",
+                "장 분위기: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20% / 기준시각 2026-05-07T13:35:00+00:00",
+            ],
+            "next_actions": ["추격보다 눌림 확인"],
+        }
+
+        text = build_alert_text(payload)
+
+        self.assertIn("4) 주도 종목", text)
+        self.assertIn("5) 로테이션", text)
+        self.assertIn("\n• 우주 내부 발사체로 자금 이동", text)
+        self.assertIn("6) 매매 관점", text)
+        self.assertIn("한줄 판단:", text)
+        self.assertIn("M1", text)
+        self.assertIn("종합:", text)
+        self.assertNotIn("[truncated]", text)
         self.assertLessEqual(len(text), 1200)
 
     def test_build_alert_text_keeps_movers_and_etf_when_rotation_lines_expand_focus(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
 
         payload = {
-            "summary": "장중 테마 강약: 반도체/AI칩 > 메모리/스토리지 주도 / 반도체/AI칩 > AI 가속기/GPU 약세 / 레짐 중립",
+            "summary": "장중 테마 강약: 반도체/AI칩 > 메모리/스토리지 주도 / 반도체/AI칩 > AI 가속기/GPU 약세 / 장 분위기 중립",
             "focus": [
-                "시장 레짐: 중립 / VIX 안정",
+                "장 분위기: 중립 / VIX/오일/금리/DXY 뚜렷한 충격 없음",
                 "강한 테마: 반도체/AI칩 평균 +2.00% / 상승비율 70.0% / 주도 MU +6.00%",
                 "약한 테마: 암호화/코인 관련주 평균 -1.00% / 상승비율 30.0% / 주도 COIN -1.00%",
                 "강한 세부테마: 반도체/AI칩 > 메모리/스토리지 평균 +5.33% / 상승비율 100.0% / 주도 MU +6.00%",
@@ -66,17 +157,87 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
                 "로테이션 해석: 반도체/AI칩 내부 메모리/스토리지로 자금 이동 / AI 가속기/GPU 약세(강세 MU +6.00% vs 약세 NVDA -3.00%)",
                 "오늘 먼저 볼 종목: MU +6.00%(메모리/스토리지) | SNDK +6.00%(메모리/스토리지)",
                 "ETF 시장 참고: 강세 기술 XLK +1.00% / 약세 유틸리티 XLU -1.00%",
-                "벤치마크: SPY +0.00% / QQQ +0.00% / 기준시각 2026-04-30T13:35:00+00:00",
+                "장 분위기: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20% / 기준시각 2026-04-30T13:35:00+00:00",
             ],
             "next_actions": ["메모리/스토리지 추격은 AI 가속기/GPU 회복 전까지 눌림/분할로 제한"],
         }
 
         text = build_alert_text(payload)
 
-        self.assertIn("로테이션 해석", text)
-        self.assertIn("오늘 먼저 볼 종목", text)
+        self.assertIn("5) 로테이션", text)
+        self.assertIn("4) 주도 종목", text)
         self.assertIn("ETF 시장 참고", text)
-        self.assertIn("벤치마크", text)
+        self.assertIn("1) 장 분위기", text)
+        self.assertIn("• 반도체/AI칩 내부 메모리/스토리지로 자금 이동", text)
+        self.assertIn("• AI 가속기/GPU 약세", text)
+        self.assertNotIn("\n• 반도체\n• AI칩", text)
+        self.assertNotIn("QQQ", text)
+        self.assertNotIn("[truncated]", text)
+        self.assertLessEqual(len(text), 1200)
+
+
+    def test_build_alert_text_surfaces_previous_close_strength_line(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_text
+
+        payload = {
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 우주 주도 / 장 분위기 중립",
+            "collected_at": "2026-05-08T13:35:00+00:00",
+            "focus": [
+                "장 분위기: 중립 / VIX 충격 없음",
+                "강한 테마: 우주/항공우주 평균 +2.00% / 상승비율 80.0% / 주도 RKLB +4.00%",
+                "약한 테마: 양자/차세대컴퓨팅 평균 -2.00% / 상승비율 20.0% / 주도 IONQ -1.00%",
+                "전일종가 대비 현재 강세: RKLB +10.00% 가격 110, 정규장, 기준 전일 정규장 종가 대비 현재가, 출처 Yahoo chart 1m includePrePost | MU +9.00% 가격 109, 정규장, 기준 전일 정규장 종가 대비 현재가, 출처 Yahoo chart 1m includePrePost",
+                "테마별 대장주: 우주/항공우주: RKLB +10.00% 가격 110, 정규장, 주도 | 반도체/AI칩: MU +9.00% 가격 109, 정규장, 주도",
+                "로테이션 해석: 우주 내부 발사체로 자금 이동 / 위성 약세",
+                "장 분위기: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20% / 기준시각 2026-05-08T13:35:00+00:00",
+            ],
+            "next_actions": ["추격보다 눌림 확인"],
+        }
+
+        text = build_alert_text(payload)
+
+        self.assertIn("전일종가 대비 현재 강세", text)
+        self.assertIn("기준: 전일 정규장 종가 대비 현재가 / Yahoo chart 1m", text)
+        self.assertIn("RKLB +10.00%", text)
+        self.assertIn("MU +9.00%", text)
+        self.assertIn("반도체: MU", text)
+        self.assertNotIn("AI: MU", text)
+        for heading in ("5) 로테이션", "6) 매매 관점", "한줄 판단:"):
+            self.assertIn(heading, text)
+        self.assertLessEqual(len(text), 1200)
+
+    def test_build_alert_text_compacts_verbose_theme_leaders_without_cutting_sections(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_text
+
+        tech = " — RSI 64(+5): 50선 위에서 재가속; MACD 0.72/0.41 h+0.31(+0.09): 신호선 위·히스토그램 확대; 스토캐스틱 Slow 88/82(+4): 과열권 K>D 유지; BB 92%(+8) 상단권: 상단 확장; 종합: 모멘텀 개선 중"
+        leaders = " | ".join(
+            f"테마{i}: AAA{i} +{i}.00% 가격 {10+i}, 정규장, 정규장 종가 대비, 주도{tech}"
+            for i in range(1, 8)
+        )
+        payload = {
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 우주 주도 / 장 분위기 중립",
+            "collected_at": "2026-05-07T13:35:00+00:00",
+            "focus": [
+                "장 분위기: 중립 / VIX/오일/금리/DXY 뚜렷한 충격 없음",
+                "강한 테마: 우주 평균 +2.00% / 상승비율 80.0% / 주도 AAA1 +1.00% | 반도체 평균 +1.00% / 상승비율 70.0% / 주도 AAA2 +2.00%",
+                "약한 테마: 양자 평균 -2.00% / 상승비율 20.0% / 주도 AAA7 -1.00%",
+                f"테마별 대장주: {leaders}",
+                "로테이션 해석: 우주 내부 발사체로 자금 이동 / 위성 약세",
+                "장 분위기: NASDAQ +0.10% / SPY +0.00% / SOXX +0.20% / BTCUSDT +0.30% / WTI -0.10% / VIX -0.20% / 기준시각 2026-05-07T13:35:00+00:00",
+            ],
+            "next_actions": ["추격보다 눌림 확인"],
+        }
+
+        text = build_alert_text(payload)
+
+        for heading in ("4) 주도 종목", "5) 로테이션", "6) 매매 관점", "한줄 판단:"):
+            self.assertIn(heading, text)
+        self.assertIn("AAA1", text)
+        self.assertIn("AAA7", text)
+        self.assertIn("스토캐스틱 Slow", text)
+        self.assertNotIn("[truncated]", text)
         self.assertLessEqual(len(text), 1200)
 
     def test_oil_vix_alert_signature_and_text_focus_on_triggers(self) -> None:
@@ -225,6 +386,30 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertEqual(changed["status"], "ok")
         self.assertIn("signature", changed)
         self.assertEqual(fake_sender.call_count, 2)
+
+    def test_build_alert_text_includes_session_context_when_present(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_text
+
+        text = build_alert_text({
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 우주 주도",
+            "collected_at": "2026-05-07T21:10:00+00:00",
+            "focus": [
+                "장 분위기: 중립 / VIX 충격 없음",
+                "세션: 토스 데이마켓/주간거래 / Toss base 대비 / source toss_wts_stock_prices",
+                "강한 테마: 우주/항공우주 평균 +2.00% / 상승비율 80.0% / 주도 RKLB +4.00%",
+                "약한 테마: 암호화/코인 관련주 평균 -2.00% / 상승비율 20.0% / 주도 COIN -1.00%",
+                "오늘 먼저 볼 종목: RKLB +2.64%(우주/항공우주; 7.2, 토스 데이마켓/주간거래, Toss base 대비)",
+                "로테이션 해석: 뚜렷한 세부테마 내부 로테이션 없음",
+                "장 분위기: NASDAQ n/a / SPY +1.10% / SOXX +0.90% / BTCUSDT n/a / WTI n/a / VIX n/a / 세션 토스 데이마켓/주간거래 / 기준시각 2026-05-07T21:10:00+00:00",
+            ],
+            "next_actions": ["정규장 종가 기준이면 추격 금지"],
+        })
+
+        self.assertIn("- 세션: 토스 데이마켓/주간거래 / Toss base 대비 / source toss_wts_stock_prices", text)
+        self.assertIn("RKLB +2.64%(우주/항공우주; 7.2, 토스 데이마켓/주간거래, Toss base 대비)", text)
+        self.assertNotIn("QQQ", text)
+        self.assertNotIn("시장 레짐", text)
 
 
 if __name__ == "__main__":

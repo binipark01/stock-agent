@@ -3,6 +3,47 @@ from unittest.mock import patch
 
 
 class SectorStrengthTest(unittest.TestCase):
+    def test_rsi_interpretation_uses_25_75_extremes(self) -> None:
+        from src.sector_strength import _technical_suffix
+
+        high_but_not_extreme = _technical_suffix({"rsi14": 74.0, "rsi14_delta": 5.0})
+        self.assertIn("RSI 74(+5)", high_but_not_extreme)
+        self.assertIn("50선 위에서 재가속", high_but_not_extreme)
+        self.assertNotIn("과열권", high_but_not_extreme)
+
+        overbought = _technical_suffix({"rsi14": 76.0, "rsi14_delta": 2.0})
+        self.assertIn("RSI 76(+2)", overbought)
+        self.assertIn("과열권", overbought)
+
+        oversold = _technical_suffix({"rsi14": 24.0, "rsi14_delta": -2.0})
+        self.assertIn("RSI 24(-2)", oversold)
+        self.assertIn("과매도권", oversold)
+
+    def test_report_includes_current_strength_against_previous_regular_close(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"symbol": "SPY", "price": 500.0, "previous_close": 500.0, "source": "yahoo_chart_quote", "price_source": "yahoo_chart_quote", "pct_change_basis": "정규장 종가 대비", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "^IXIC": {"symbol": "^IXIC", "price": 17000.0, "previous_close": 16900.0, "source": "yahoo_chart_quote", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "SOXX": {"symbol": "SOXX", "price": 220.0, "previous_close": 218.0, "source": "yahoo_chart_quote", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "BTC-USD": {"symbol": "BTC-USD", "price": 100000.0, "previous_close": 99000.0, "source": "yahoo_chart_quote", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "CL=F": {"symbol": "CL=F", "price": 70.0, "previous_close": 71.0, "source": "yahoo_chart_quote", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "^VIX": {"symbol": "^VIX", "price": 17.0, "previous_close": 18.0, "source": "yahoo_chart_quote", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "RKLB": {"symbol": "RKLB", "price": 110.0, "previous_close": 100.0, "source": "yahoo_chart_quote", "price_source": "yahoo_chart_quote", "pct_change_basis": "정규장 종가 대비", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "MU": {"symbol": "MU", "price": 109.0, "previous_close": 100.0, "source": "yahoo_chart_quote", "price_source": "yahoo_chart_quote", "pct_change_basis": "정규장 종가 대비", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "COIN": {"symbol": "COIN", "price": 103.0, "previous_close": 100.0, "source": "yahoo_chart_quote", "price_source": "yahoo_chart_quote", "pct_change_basis": "정규장 종가 대비", "timestamp": "2026-05-08T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-05-08T13:35:00+00:00")
+        focus_text = "\n".join(report["focus_lines"])
+
+        self.assertIn("전일종가 대비 현재 강세:", focus_text)
+        self.assertIn("기준 전일 정규장 종가 대비 현재가", focus_text)
+        self.assertIn("Yahoo chart 1m includePrePost", focus_text)
+        self.assertRegex(focus_text, r"RKLB \+10\.00%.*가격 110")
+        self.assertRegex(focus_text, r"MU \+9\.00%.*가격 109")
+        self.assertLess(focus_text.find("RKLB +10.00%"), focus_text.find("MU +9.00%"))
+
     def test_ranks_sector_etfs_by_absolute_and_relative_strength(self) -> None:
         from src.sector_strength import build_sector_strength_report
 
@@ -19,10 +60,10 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertEqual(report["available"], True)
         self.assertEqual(report["strong"][0]["symbol"], "XLK")
         self.assertGreater(report["strong"][0]["relative_to_spy_pct"], 1.0)
-        self.assertGreater(report["strong"][0]["relative_to_qqq_pct"], 0.5)
         self.assertEqual(report["weak"][0]["symbol"], "XLU")
         self.assertLess(report["weak"][0]["relative_to_spy_pct"], -2.0)
         self.assertTrue(any("ETF 시장 참고" in line and "XLK" in line and "XLU" in line for line in report["focus_lines"]))
+        self.assertNotIn("QQQ", "\n".join(report["focus_lines"] + report["next_actions"]))
 
     def test_classifies_risk_off_when_vix_oil_yields_and_dxy_jump(self) -> None:
         from src.sector_strength import build_sector_strength_report
@@ -44,7 +85,7 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertTrue(any("VIX" in signal for signal in report["regime"]["signals"]))
         self.assertTrue(any("WTI" in signal or "오일" in signal for signal in report["regime"]["signals"]))
         self.assertTrue(any("고베타" in action or "추격" in action for action in report["next_actions"]))
-        self.assertTrue(any("시장 레짐" in line and "리스크오프" in line for line in report["focus_lines"]))
+        self.assertTrue(any("장 분위기" in line and "리스크오프" in line for line in report["focus_lines"]))
 
     def test_oil_vix_report_detects_vol_backwardation_and_oil_shock(self) -> None:
         from src.sector_strength import build_oil_vix_report
@@ -118,7 +159,55 @@ class SectorStrengthTest(unittest.TestCase):
 
         self.assertFalse(report["available"])
         self.assertIn("SPY", report["summary"])
-        self.assertEqual(report["focus_lines"][0], "섹터 강약: SPY/QQQ 기준 데이터가 부족합니다")
+        self.assertEqual(report["focus_lines"][0], "섹터 강약: SPY 기준 데이터가 부족합니다")
+
+    def test_sector_strength_report_does_not_require_or_compare_qqq(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "^IXIC": {"price": 16000.0, "previous_close": 15840.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "SOXX": {"price": 220.0, "previous_close": 215.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "BTC-USD": {"price": 65000.0, "previous_close": 64000.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "CL=F": {"price": 80.0, "previous_close": 81.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "^VIX": {"price": 18.0, "previous_close": 18.5, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 27.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "LUNR": {"price": 12.6, "previous_close": 12.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-04-30T13:35:00+00:00")
+
+        self.assertTrue(report["available"])
+        focus_text = "\n".join(report["focus_lines"] + report["next_actions"])
+        self.assertIn("장 분위기", focus_text)
+        self.assertIn("NASDAQ", focus_text)
+        self.assertIn("BTCUSDT", focus_text)
+        self.assertIn("WTI", focus_text)
+        self.assertNotIn("QQQ", focus_text)
+        self.assertNotIn("QQQ", report["benchmarks"])
+
+    def test_sector_strength_report_keeps_benchmark_labels_when_one_quote_is_missing(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 499.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "SOXX": {"price": 220.0, "previous_close": 219.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "BTC-USD": {"price": 65000.0, "previous_close": 65000.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "CL=F": {"price": 80.0, "previous_close": 81.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "^VIX": {"price": 18.0, "previous_close": 18.5, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 27.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "LUNR": {"price": 12.6, "previous_close": 12.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-04-30T13:35:00+00:00")
+        focus_text = "\n".join(report["focus_lines"])
+
+        self.assertIn("NASDAQ n/a / SPY", focus_text)
+        self.assertIn("SOXX", focus_text)
+        self.assertIn("BTCUSDT", focus_text)
+        self.assertIn("WTI", focus_text)
+        self.assertIn("VIX", focus_text)
+        self.assertNotIn("QQQ", focus_text)
 
     def test_user_watchlist_theme_baskets_rank_space_and_show_internal_leaders(self) -> None:
         from src.sector_strength import build_sector_strength_report
@@ -187,7 +276,7 @@ class SectorStrengthTest(unittest.TestCase):
         quotes = {
             "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
             "QQQ": {"price": 430.0, "previous_close": 430.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
-            "RKLB": {"price": 30.0, "previous_close": 27.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 27.0, "rsi14": 64.2, "rsi14_delta": 5.1, "bollinger_position_pct": 92.0, "bollinger_position_delta": 8.4, "bollinger_bandwidth_pct": 12.5, "bollinger_bandwidth_delta": 1.8, "bollinger_state": "상단권", "ichimoku_conversion": 29.5, "ichimoku_base": 28.0, "ichimoku_cloud_top": 29.0, "ichimoku_cloud_bottom": 25.0, "ichimoku_cloud_distance_pct": 3.3, "ichimoku_conversion_base_spread": 1.5, "ichimoku_cloud_state": "구름 위", "macd_line": 0.72, "macd_signal": 0.41, "macd_histogram": 0.31, "macd_histogram_delta": 0.09, "macd_state": "상방", "stochastic_k": 88.0, "stochastic_d": 82.0, "stochastic_k_delta": 4.2, "stochastic_d_delta": 2.7, "stochastic_state": "과열", "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
             "LUNR": {"price": 12.6, "previous_close": 12.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
             "COIN": {"price": 220.0, "previous_close": 211.54, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
             "HIMS": {"price": 45.0, "previous_close": 50.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
@@ -197,7 +286,25 @@ class SectorStrengthTest(unittest.TestCase):
 
         self.assertEqual(report["watchlist_movers"][0]["symbol"], "RKLB")
         self.assertEqual(report["watchlist_movers"][0]["theme"], "우주/항공우주")
+        self.assertEqual(report["watchlist_movers"][0]["rsi14"], 64.2)
+        self.assertEqual(report["watchlist_movers"][0]["bollinger_state"], "상단권")
+        self.assertEqual(report["watchlist_movers"][0]["ichimoku_cloud_state"], "구름 위")
+        self.assertEqual(report["watchlist_movers"][0]["macd_state"], "상방")
+        self.assertEqual(report["watchlist_movers"][0]["stochastic_state"], "과열")
+        expected_fragments = (
+            "RSI 64(+5): 50선 위에서 재가속",
+            "MACD 0.72/0.41 h+0.31(+0.09): 신호선 위·히스토그램 확대",
+            "스토캐스틱 Slow 88/82(+4): 과열권 K>D 유지",
+            "BB 92%(+8) 상단권: 상단 확장",
+            "종합: 모멘텀 개선 중",
+        )
         self.assertTrue(any("오늘 먼저 볼 종목" in line and "RKLB" in line and "COIN" in line for line in report["focus_lines"]))
+        focus_text = "\n".join(report["focus_lines"])
+        for fragment in expected_fragments:
+            self.assertIn(fragment, focus_text)
+        self.assertNotIn("Stoch ", focus_text)
+        self.assertNotIn("구름", focus_text)
+        self.assertNotIn("전환선", focus_text)
 
     def test_theme_basket_lines_include_trading_value_when_quote_has_volume(self) -> None:
         from src.sector_strength import build_sector_strength_report
@@ -339,6 +446,8 @@ class SectorStrengthTest(unittest.TestCase):
             }
 
         with patch("src.yfinance_data.fetch_yfinance_market_pack", side_effect=AssertionError("must not use full market pack")), patch(
+            "src.yfinance_data.fetch_toss_wts_quote_packs", return_value={}
+        ), patch(
             "src.yfinance_data.fetch_yahoo_chart_quote_pack", side_effect=fake_chart_pack
         ) as chart_pack, patch("src.yfinance_data.fetch_yfinance_quote_pack", side_effect=AssertionError("must not use fallback when chart quote is available")):
             quotes = fetch_sector_strength_quotes(["OKLO", "SMR"])
@@ -362,6 +471,8 @@ class SectorStrengthTest(unittest.TestCase):
             }
 
         with patch("src.yfinance_data.fetch_yfinance_market_pack", side_effect=AssertionError("must not use full market pack")), patch(
+            "src.yfinance_data.fetch_toss_wts_quote_packs", return_value={}
+        ), patch(
             "src.yfinance_data.fetch_yahoo_chart_quote_pack", side_effect=fake_chart_pack
         ), patch("src.yfinance_data.fetch_yfinance_quote_pack", side_effect=fake_quote_pack) as quote_pack:
             quotes = fetch_sector_strength_quotes(["SPY", "RKLB"])
@@ -369,6 +480,54 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertEqual(quote_pack.call_count, 2)
         self.assertEqual(quotes["SPY"]["source"], "quote-only-test")
         self.assertEqual(quotes["RKLB"]["pct_change"], 1.0)
+
+    def test_fetch_sector_strength_quotes_prefers_toss_display_price_but_keeps_yahoo_technicals(self) -> None:
+        from src.sector_strength import fetch_sector_strength_quotes
+
+        def fake_chart_pack(symbol: str) -> dict:
+            return {
+                "available": True,
+                "source": "yahoo_chart_quote",
+                "collected_at": "2026-04-30T20:05:00+00:00",
+                "quote": {
+                    "price": 26.5,
+                    "previous_close": 26.5,
+                    "pct_change": 0.0,
+                    "session_label": "애프터장",
+                    "is_stale_regular_close": True,
+                    "rsi14": 61.2,
+                },
+            }
+
+        def fake_toss_packs(symbols) -> dict:
+            return {
+                "RKLB": {
+                    "available": True,
+                    "source": "toss_wts_stock_prices",
+                    "collected_at": "2026-04-30T20:06:00+00:00",
+                    "quote": {
+                        "price": 27.2,
+                        "previous_close": 26.5,
+                        "pct_change": 2.64,
+                        "session_label": "토스 데이마켓/주간거래",
+                        "pct_change_basis": "Toss base 대비",
+                        "price_source": "toss_wts_stock_prices",
+                        "is_stale_regular_close": False,
+                    },
+                }
+            }
+
+        with patch("src.yfinance_data.fetch_toss_wts_quote_packs", side_effect=fake_toss_packs), patch(
+            "src.yfinance_data.fetch_yahoo_chart_quote_pack", side_effect=fake_chart_pack
+        ), patch("src.yfinance_data.fetch_yfinance_quote_pack", side_effect=AssertionError("chart quote should be enough")):
+            quotes = fetch_sector_strength_quotes(["RKLB"])
+
+        self.assertEqual(quotes["RKLB"]["price"], 27.2)
+        self.assertEqual(quotes["RKLB"]["pct_change"], 2.64)
+        self.assertEqual(quotes["RKLB"]["session_label"], "토스 데이마켓/주간거래")
+        self.assertEqual(quotes["RKLB"]["pct_change_basis"], "Toss base 대비")
+        self.assertFalse(quotes["RKLB"]["is_stale_regular_close"])
+        self.assertEqual(quotes["RKLB"]["rsi14"], 61.2)
 
 
 if __name__ == "__main__":

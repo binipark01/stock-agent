@@ -73,6 +73,155 @@ def _round_or_none(value: Any, digits: int = 2) -> float | None:
     return round(numeric, digits)
 
 
+TOSS_WTS_PRODUCT_CODES: dict[str, str] = {
+    "SPY": "US19930122001",
+    "SOXX": "US20010713001",
+    "NVDA": "US19990122001",
+    "PLTR": "US20200930014",
+    "RKLB": "US20210825002",
+    "RDW": "US20210903005",
+    "RDDT": "NYS0240321001",
+    "AMD": "US20150102001",
+    "SMCI": "US20200114002",
+    "OKLO": "US20210701009",
+    "JOBY": "US20210811006",
+    "ASTS": "US20210407001",
+    "COIN": "US20210414003",
+    "MSTR": "US19980611001",
+}
+_PRODUCT_CODE_TO_SYMBOL = {code: symbol for symbol, code in TOSS_WTS_PRODUCT_CODES.items()}
+
+
+def _toss_session_label(raw: Any) -> str:
+    text = str(raw or "").strip()
+    upper = text.upper()
+    if not upper:
+        return "데이터 없음"
+    if "DAY" in upper or "주간" in text or "데이" in text:
+        return "토스 데이마켓/주간거래"
+    if "PRE" in upper or "BEFORE" in upper or "프리" in text:
+        return "프리마켓"
+    if "AFTER" in upper or "POST" in upper or "애프터" in text:
+        return "애프터장"
+    if "REGULAR" in upper or "NORMAL" in upper or "정규" in text:
+        return "정규장"
+    if "CLOSE" in upper or "휴장" in text:
+        return "휴장/데이터 없음"
+    return text
+
+
+def _extract_toss_price_rows(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [row for row in payload if isinstance(row, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("result", "data", "prices", "stockPrices", "stock_prices"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return [row for row in value if isinstance(row, dict)]
+    if isinstance(payload.get("result"), dict):
+        return _extract_toss_price_rows(payload.get("result"))
+    if isinstance(payload.get("data"), dict):
+        return _extract_toss_price_rows(payload.get("data"))
+    return []
+
+
+def _toss_row_symbol(row: dict[str, Any]) -> str | None:
+    code = str(row.get("productCode") or row.get("product_code") or row.get("code") or "").strip()
+    if code and code in _PRODUCT_CODE_TO_SYMBOL:
+        return _PRODUCT_CODE_TO_SYMBOL[code]
+    symbol = str(row.get("symbol") or row.get("ticker") or row.get("tickerSymbol") or "").strip().upper()
+    return symbol or None
+
+
+def _quote_from_toss_wts_row(symbol: str, row: dict[str, Any]) -> dict[str, Any] | None:
+    price = _to_float(row.get("close"))
+    base = _to_float(row.get("base"))
+    if price is None:
+        return None
+    pct_change = round(((price - float(base)) / float(base)) * 100, 2) if base not in (None, 0) else None
+    session_raw = row.get("session")
+    session_label = _toss_session_label(session_raw)
+    quote = {
+        "price": round(price, 2),
+        "previous_close": round(float(base), 2) if base is not None else None,
+        "pct_change": pct_change,
+        "volume": _to_int(row.get("volume")),
+        "currency": "USD",
+        "exchange": row.get("exchange") or row.get("market") or "Toss WTS",
+        "session": session_raw,
+        "session_label": session_label,
+        "pct_change_basis": "Toss base 대비",
+        "price_source": "toss_wts_stock_prices",
+        "is_stale_regular_close": False,
+    }
+    return quote
+
+
+def fetch_toss_wts_quote_packs(symbols: list[str] | tuple[str, ...] | set[str]) -> dict[str, dict[str, Any]]:
+    selected_codes = []
+    code_to_symbol: dict[str, str] = {}
+    for raw_symbol in symbols:
+        symbol = str(raw_symbol).upper()
+        code = TOSS_WTS_PRODUCT_CODES.get(symbol)
+        if not code:
+            continue
+        selected_codes.append(code)
+        code_to_symbol[code] = symbol
+    if not selected_codes:
+        return {}
+    query = urllib.parse.urlencode({"productCodes": ",".join(selected_codes)})
+    url = f"https://wts-info-api.tossinvest.com/api/v1/product/stock-prices?{query}"
+    headers = {"User-Agent": "Mozilla/5.0", "Accept": "application/json"}
+    collected_at = datetime.now(timezone.utc).isoformat()
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        rows = _extract_toss_price_rows(payload)
+    except Exception as exc:
+        return {
+            symbol: {
+                "available": False,
+                "source": "toss_wts_stock_prices_error",
+                "symbol": symbol,
+                "collected_at": collected_at,
+                "warning": str(exc),
+            }
+            for symbol in code_to_symbol.values()
+        }
+    packs: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        symbol = _toss_row_symbol(row)
+        if not symbol:
+            code = str(row.get("productCode") or row.get("product_code") or row.get("code") or "").strip()
+            symbol = code_to_symbol.get(code)
+        if not symbol or symbol not in set(str(item).upper() for item in symbols):
+            continue
+        quote = _quote_from_toss_wts_row(symbol, row)
+        if quote is None:
+            continue
+        packs[symbol] = {
+            "available": True,
+            "source": "toss_wts_stock_prices",
+            "symbol": symbol,
+            "collected_at": collected_at,
+            "quote": quote,
+            "warnings": [],
+        }
+    for symbol in code_to_symbol.values():
+        packs.setdefault(
+            symbol,
+            {
+                "available": False,
+                "source": "toss_wts_stock_prices_missing",
+                "symbol": symbol,
+                "collected_at": collected_at,
+                "warning": "Toss WTS row missing",
+            },
+        )
+    return packs
+
+
 def _table_to_records(table: Any, limit: int = 5) -> list[dict[str, Any]]:
     if table is None:
         return []
@@ -250,21 +399,292 @@ def _intraday_pct(points: list[tuple[Any, Any]], minutes: int) -> float | None:
     return round(((latest - float(baseline)) / float(baseline)) * 100, 2)
 
 
+def _simple_rsi(values: list[float], period: int = 14) -> float | None:
+    if len(values) < 2:
+        return None
+    changes = [values[idx] - values[idx - 1] for idx in range(1, len(values))]
+    window = changes[-period:] if len(changes) >= period else changes
+    if not window:
+        return None
+    gains = [change for change in window if change > 0]
+    losses = [-change for change in window if change < 0]
+    avg_gain = sum(gains) / len(window)
+    avg_loss = sum(losses) / len(window)
+    if avg_loss == 0:
+        return 100.0 if avg_gain > 0 else 50.0
+    rs = avg_gain / avg_loss
+    return round(100 - (100 / (1 + rs)), 2)
+
+
+def _bollinger_state(position_pct: float | None) -> str | None:
+    if position_pct is None:
+        return None
+    if position_pct >= 90:
+        return "상단권"
+    if position_pct >= 70:
+        return "상단근접"
+    if position_pct <= 10:
+        return "하단권"
+    if position_pct <= 30:
+        return "하단근접"
+    return "중립"
+
+
+def _ema_series(values: list[float], period: int) -> list[float]:
+    if len(values) < period:
+        return []
+    multiplier = 2 / (period + 1)
+    ema = sum(values[:period]) / period
+    series = [ema]
+    for value in values[period:]:
+        ema = ((value - ema) * multiplier) + ema
+        series.append(ema)
+    return series
+
+
+def _macd_state(histogram: float | None) -> str | None:
+    if histogram is None:
+        return None
+    if histogram > 0:
+        return "상방"
+    if histogram < 0:
+        return "하방"
+    return "중립"
+
+
+def _stochastic_state(k_value: float | None) -> str | None:
+    if k_value is None:
+        return None
+    if k_value >= 80:
+        return "과열"
+    if k_value <= 20:
+        return "침체"
+    return "중립"
+
+
+def _bollinger_snapshot(closes: list[float]) -> tuple[float, float, float, float | None, float | None] | None:
+    if len(closes) < 20:
+        return None
+    window = closes[-20:]
+    mid = sum(window) / len(window)
+    variance = sum((value - mid) ** 2 for value in window) / len(window)
+    std = math.sqrt(variance)
+    upper = mid + (2 * std)
+    lower = mid - (2 * std)
+    latest = closes[-1]
+    position = ((latest - lower) / (upper - lower)) * 100 if upper != lower else None
+    bandwidth = ((upper - lower) / mid) * 100 if mid else None
+    return mid, upper, lower, position, bandwidth
+
+
+def _technical_fields_from_closes(closes: list[float]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    rsi = _simple_rsi(closes, 14)
+    if rsi is not None:
+        fields["rsi14"] = round(rsi, 1)
+        previous_rsi = _simple_rsi(closes[:-1], 14) if len(closes) > 2 else None
+        if previous_rsi is not None:
+            fields["rsi14_prev"] = round(previous_rsi, 1)
+            fields["rsi14_delta"] = round(rsi - previous_rsi, 1)
+    current_bollinger = _bollinger_snapshot(closes)
+    if current_bollinger is not None:
+        mid, upper, lower, position, bandwidth = current_bollinger
+        fields["bollinger_mid"] = round(mid, 2)
+        fields["bollinger_upper"] = round(upper, 2)
+        fields["bollinger_lower"] = round(lower, 2)
+        if position is not None:
+            fields["bollinger_position_pct"] = round(position, 1)
+        if bandwidth is not None:
+            fields["bollinger_bandwidth_pct"] = round(bandwidth, 1)
+        previous_bollinger = _bollinger_snapshot(closes[:-1]) if len(closes) >= 21 else None
+        if previous_bollinger is not None:
+            _, _, _, previous_position, previous_bandwidth = previous_bollinger
+            if position is not None and previous_position is not None:
+                fields["bollinger_position_prev"] = round(previous_position, 1)
+                fields["bollinger_position_delta"] = round(position - previous_position, 1)
+            if bandwidth is not None and previous_bandwidth is not None:
+                fields["bollinger_bandwidth_prev"] = round(previous_bandwidth, 1)
+                fields["bollinger_bandwidth_delta"] = round(bandwidth - previous_bandwidth, 1)
+        fields["bollinger_state"] = _bollinger_state(position)
+    if len(closes) >= 34:
+        ema12 = _ema_series(closes, 12)
+        ema26 = _ema_series(closes, 26)
+        macd_values = [ema12[original_idx - 11] - ema26[original_idx - 25] for original_idx in range(25, len(closes))]
+        signal_values = _ema_series(macd_values, 9)
+        if macd_values and signal_values:
+            macd_line = macd_values[-1]
+            signal = signal_values[-1]
+            histogram = macd_line - signal
+            fields["macd_line"] = round(macd_line, 2)
+            fields["macd_signal"] = round(signal, 2)
+            fields["macd_histogram"] = round(histogram, 2)
+            if len(signal_values) >= 2 and len(macd_values) >= 2:
+                previous_macd_line = macd_values[-2]
+                previous_signal = signal_values[-2]
+                previous_histogram = previous_macd_line - previous_signal
+                fields["macd_line_prev"] = round(previous_macd_line, 2)
+                fields["macd_signal_prev"] = round(previous_signal, 2)
+                fields["macd_histogram_prev"] = round(previous_histogram, 2)
+                fields["macd_histogram_delta"] = round(histogram - previous_histogram, 2)
+            fields["macd_state"] = _macd_state(histogram)
+    return fields
+
+
+def _ichimoku_cloud_state(latest_close: float, cloud_top: float, cloud_bottom: float) -> str:
+    if latest_close > cloud_top:
+        return "구름 위"
+    if latest_close < cloud_bottom:
+        return "구름 아래"
+    return "구름 안"
+
+
+def _technical_fields_from_ohlc(closes: list[float], highs: list[float], lows: list[float]) -> dict[str, Any]:
+    fields = _technical_fields_from_closes(closes)
+    if len(closes) >= 16 and len(highs) >= 16 and len(lows) >= 16:
+        fast_k_values: list[float] = []
+        for end_idx in range(13, len(closes)):
+            high_window = highs[end_idx - 13 : end_idx + 1]
+            low_window = lows[end_idx - 13 : end_idx + 1]
+            high_14 = max(high_window)
+            low_14 = min(low_window)
+            if high_14 != low_14:
+                fast_k_values.append(((closes[end_idx] - low_14) / (high_14 - low_14)) * 100)
+        slow_k_values = [sum(fast_k_values[idx - 2 : idx + 1]) / 3 for idx in range(2, len(fast_k_values))]
+        slow_d_values = [sum(slow_k_values[idx - 2 : idx + 1]) / 3 for idx in range(2, len(slow_k_values))]
+        if slow_k_values:
+            stochastic_k = slow_k_values[-1]
+            stochastic_d = slow_d_values[-1] if slow_d_values else sum(slow_k_values[-3:]) / len(slow_k_values[-3:])
+            fields["stochastic_k"] = round(stochastic_k, 1)
+            fields["stochastic_d"] = round(stochastic_d, 1)
+            if len(slow_k_values) >= 2:
+                fields["stochastic_k_prev"] = round(slow_k_values[-2], 1)
+                fields["stochastic_k_delta"] = round(stochastic_k - slow_k_values[-2], 1)
+            if len(slow_d_values) >= 2:
+                fields["stochastic_d_prev"] = round(slow_d_values[-2], 1)
+                fields["stochastic_d_delta"] = round(stochastic_d - slow_d_values[-2], 1)
+            fields["stochastic_state"] = _stochastic_state(stochastic_k)
+    if len(closes) < 52 or len(highs) < 52 or len(lows) < 52:
+        return fields
+
+    conversion = (max(highs[-9:]) + min(lows[-9:])) / 2
+    base = (max(highs[-26:]) + min(lows[-26:])) / 2
+    span_a = (conversion + base) / 2
+    span_b = (max(highs[-52:]) + min(lows[-52:])) / 2
+    cloud_top = max(span_a, span_b)
+    cloud_bottom = min(span_a, span_b)
+    latest_close = closes[-1]
+    if latest_close > cloud_top:
+        cloud_distance = ((latest_close - cloud_top) / latest_close) * 100
+    elif latest_close < cloud_bottom:
+        cloud_distance = ((latest_close - cloud_bottom) / latest_close) * 100
+    else:
+        cloud_distance = 0.0
+    fields.update(
+        {
+            "ichimoku_conversion": round(conversion, 2),
+            "ichimoku_base": round(base, 2),
+            "ichimoku_span_a": round(span_a, 2),
+            "ichimoku_span_b": round(span_b, 2),
+            "ichimoku_cloud_top": round(cloud_top, 2),
+            "ichimoku_cloud_bottom": round(cloud_bottom, 2),
+            "ichimoku_cloud_distance_pct": round(cloud_distance, 1),
+            "ichimoku_conversion_base_spread": round(conversion - base, 2),
+            "ichimoku_cloud_state": _ichimoku_cloud_state(latest_close, cloud_top, cloud_bottom),
+        }
+    )
+    return fields
+
+
+def _timestamp_in_yahoo_period(timestamp: Any, period: Any) -> bool:
+    if not isinstance(period, dict):
+        return False
+    ts = _to_float(timestamp)
+    start = _to_float(period.get("start"))
+    end = _to_float(period.get("end"))
+    if ts is None or start is None or end is None:
+        return False
+    return float(start) <= float(ts) < float(end)
+
+
+def _is_yahoo_regular_session_quote(meta: dict[str, Any], last_ts: Any) -> bool:
+    periods = meta.get("currentTradingPeriod") if isinstance(meta.get("currentTradingPeriod"), dict) else {}
+    if _timestamp_in_yahoo_period(last_ts, periods.get("regular")):
+        return True
+    market_state = str(meta.get("marketState") or "").upper()
+    return market_state == "REGULAR"
+
+
+def _yahoo_session_label(meta: dict[str, Any], last_ts: Any) -> str:
+    periods = meta.get("currentTradingPeriod") if isinstance(meta.get("currentTradingPeriod"), dict) else {}
+    if _timestamp_in_yahoo_period(last_ts, periods.get("pre")):
+        return "프리마켓"
+    if _timestamp_in_yahoo_period(last_ts, periods.get("regular")):
+        return "정규장"
+    if _timestamp_in_yahoo_period(last_ts, periods.get("post")):
+        return "애프터장"
+    market_state = str(meta.get("marketState") or "").upper()
+    if "PRE" in market_state:
+        return "프리마켓"
+    if market_state == "REGULAR":
+        return "정규장"
+    if "POST" in market_state or "AFTER" in market_state:
+        return "애프터장"
+    if "CLOSED" in market_state or "CLOSE" in market_state:
+        return "휴장/데이터 없음"
+    return market_state or "데이터 없음"
+
+
+def _is_yahoo_stale_regular_close(meta: dict[str, Any], last_ts: Any, price: Any) -> bool:
+    if _is_yahoo_regular_session_quote(meta, last_ts):
+        return False
+    session = _yahoo_session_label(meta, last_ts)
+    if session not in {"프리마켓", "애프터장", "휴장/데이터 없음", "데이터 없음"}:
+        return False
+    price_float = _to_float(price)
+    regular_price = _to_float(meta.get("regularMarketPrice"))
+    regular_time = _to_float(meta.get("regularMarketTime"))
+    last_time = _to_float(last_ts)
+    if price_float is not None and regular_price is not None and abs(price_float - regular_price) < 0.0001:
+        return True
+    if regular_time is not None and last_time is not None and int(regular_time) == int(last_time):
+        return True
+    return False
+
+
+def _select_yahoo_previous_close(meta: dict[str, Any], last_ts: Any) -> Any:
+    regular_session_previous = _safe_get(meta, "previousClose", "chartPreviousClose", "regularMarketPreviousClose")
+    regular_market_price = _safe_get(meta, "regularMarketPrice")
+    if _is_yahoo_regular_session_quote(meta, last_ts):
+        return regular_session_previous if _to_float(regular_session_previous) is not None else regular_market_price
+    return regular_market_price if _to_float(regular_market_price) is not None else regular_session_previous
+
+
 def _quote_from_yahoo_chart_result(symbol: str, result: dict[str, Any]) -> dict[str, Any]:
     meta = result.get("meta") if isinstance(result.get("meta"), dict) else {}
     timestamps = result.get("timestamp") if isinstance(result.get("timestamp"), list) else []
     quote_blocks = result.get("indicators", {}).get("quote", []) if isinstance(result.get("indicators"), dict) else []
     quote_block = quote_blocks[0] if quote_blocks and isinstance(quote_blocks[0], dict) else {}
     closes = quote_block.get("close") if isinstance(quote_block.get("close"), list) else []
+    highs = quote_block.get("high") if isinstance(quote_block.get("high"), list) else []
+    lows = quote_block.get("low") if isinstance(quote_block.get("low"), list) else []
     volumes = quote_block.get("volume") if isinstance(quote_block.get("volume"), list) else []
     points = [(ts, close) for ts, close in zip(timestamps, closes) if _to_float(close) is not None]
+    close_values = [float(_to_float(close)) for _, close in points]
+    ohlc_points = [
+        (float(close_float), float(high_float), float(low_float))
+        for close, high, low in zip(closes, highs, lows)
+        for close_float, high_float, low_float in [(_to_float(close), _to_float(high), _to_float(low))]
+        if close_float is not None and high_float is not None and low_float is not None
+    ]
     if not points:
         raise ValueError("yahoo chart has no close points")
     last_ts, last_price = points[-1]
     price_float = _to_float(last_price)
-    # During pre/post market, Yahoo chartPreviousClose can point to an older chart-range close.
-    # regularMarketPrice is the last regular-session close in that state and matches broker UI premarket %.
-    previous = _safe_get(meta, "regularMarketPrice", "previousClose", "chartPreviousClose")
+    # During regular hours, Yahoo regularMarketPrice updates to the current tick;
+    # using it as the baseline makes every alert show ~0%. Use prior regular close
+    # in regular session, but keep regularMarketPrice as the pre/post baseline where
+    # Yahoo exposes it as the last regular-session close.
+    previous = _select_yahoo_previous_close(meta, last_ts)
     previous_float = _to_float(previous)
     pct_change = None
     if price_float is not None and previous_float not in (None, 0):
@@ -278,7 +698,7 @@ def _quote_from_yahoo_chart_result(symbol: str, result: dict[str, Any]) -> dict[
         if close_float is not None and volume_float is not None:
             trading_value_points.append(close_float * volume_float)
     trading_value = sum(trading_value_points) if trading_value_points else None
-    return {
+    quote = {
         "price": round(price_float, 2) if price_float is not None else None,
         "previous_close": round(previous_float, 2) if previous_float is not None else None,
         "pct_change": pct_change,
@@ -293,7 +713,25 @@ def _quote_from_yahoo_chart_result(symbol: str, result: dict[str, Any]) -> dict[
         "regular_market_price": _round_or_none(meta.get("regularMarketPrice")),
         "chart_previous_close": _round_or_none(meta.get("chartPreviousClose")),
         "regular_market_time": datetime.fromtimestamp(int(meta["regularMarketTime"]), timezone.utc).isoformat() if meta.get("regularMarketTime") else None,
+        "market_state": meta.get("marketState"),
+        "session_label": _yahoo_session_label(meta, last_ts),
+        "price_source": "yahoo_chart_quote",
+        "pct_change_basis": "정규장 종가 대비" if _is_yahoo_regular_session_quote(meta, last_ts) else "이전 정규장/마지막 정규가 대비",
+        "is_stale_regular_close": _is_yahoo_stale_regular_close(meta, last_ts, price_float),
     }
+    if quote.get("is_stale_regular_close"):
+        quote["stale_note"] = "정규장 종가 기준(확장/주간거래 실시간가 미확인)"
+    if ohlc_points:
+        quote.update(
+            _technical_fields_from_ohlc(
+                [point[0] for point in ohlc_points],
+                [point[1] for point in ohlc_points],
+                [point[2] for point in ohlc_points],
+            )
+        )
+    else:
+        quote.update(_technical_fields_from_closes(close_values))
+    return quote
 
 
 def fetch_yahoo_chart_quote_pack(symbol: str, range_: str = "1d", interval: str = "1m") -> dict[str, Any]:
