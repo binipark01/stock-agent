@@ -4,6 +4,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+SECTOR_ALERT_COMPACT_LIMIT = 1800
+
 
 class SectorStrengthAlertRunnerTest(unittest.TestCase):
     def test_default_interval_is_five_minutes_and_once_dry_run_is_supported(self) -> None:
@@ -75,7 +77,7 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertNotIn("DXY", text)
         self.assertNotIn("금리", text)
         self.assertNotIn("[truncated]", text)
-        self.assertLessEqual(len(text), 1200)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
     def test_build_alert_text_formats_long_movers_as_mobile_friendly_bullets(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
@@ -109,7 +111,7 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertIn("5) 로테이션\n• 우주 내부 발사체로 자금 이동\n• 위성 약세", text)
         self.assertNotIn("DXY", text)
         self.assertNotIn("금리", text)
-        self.assertLessEqual(len(text), 1200)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
     def test_build_alert_text_reduces_verbose_movers_instead_of_cutting_sections(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
@@ -141,7 +143,7 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertIn("M1", text)
         self.assertIn("종합:", text)
         self.assertNotIn("[truncated]", text)
-        self.assertLessEqual(len(text), 1200)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
     def test_build_alert_text_keeps_movers_and_etf_when_rotation_lines_expand_focus(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
@@ -173,8 +175,36 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertNotIn("\n• 반도체\n• AI칩", text)
         self.assertNotIn("QQQ", text)
         self.assertNotIn("[truncated]", text)
-        self.assertLessEqual(len(text), 1200)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
+
+    def test_build_alert_text_surfaces_intraday_risk_spikes(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_text
+
+        payload = {
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 우주 주도 / 장 분위기 중립",
+            "collected_at": "2026-05-08T13:35:00+00:00",
+            "focus": [
+                "장 분위기: 중립 / VIX/오일/금리/DXY 뚜렷한 충격 없음",
+                "분봉 리스크: VIX 5m +0.88pt(+5.00%) / WTI 15m +1.20% / NASDAQ 5m -0.50%, SPY 5m -0.40%",
+                "강한 테마: 우주/항공우주 평균 +2.00% / 상승비율 80.0% / 주도 RKLB +4.00%",
+                "약한 테마: 양자/차세대컴퓨팅 평균 -2.00% / 상승비율 20.0% / 주도 IONQ -1.00%",
+                "로테이션 해석: 우주 내부 발사체로 자금 이동 / 위성 약세",
+                "장 분위기: NASDAQ -0.20% / SPY -0.10% / SOXX -0.60% / BTCUSDT +0.30% / WTI +0.20% / VIX +2.80% / 기준시각 2026-05-08T13:35:00+00:00",
+            ],
+            "next_actions": ["VIX/WTI 분봉 리스크 급등: 강한 테마도 추격보다 VWAP 눌림 대기"],
+        }
+
+        text = build_alert_text(payload)
+
+        self.assertIn("1) 장 분위기", text)
+        self.assertIn("- 리스크: VIX 5m +0.88pt(+5.00%) / WTI 15m +1.20%", text)
+        self.assertIn("NASDAQ 5m -0.50%", text)
+        self.assertIn("6) 매매 관점", text)
+        self.assertIn("VIX/WTI 분봉 리스크 급등", text)
+        self.assertIn("추격보다 VWAP 눌림 대기", text)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
     def test_build_alert_text_surfaces_previous_close_strength_line(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
@@ -205,7 +235,7 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertNotIn("AI: MU", text)
         for heading in ("5) 로테이션", "6) 매매 관점", "한줄 판단:"):
             self.assertIn(heading, text)
-        self.assertLessEqual(len(text), 1200)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
     def test_build_alert_text_compacts_verbose_theme_leaders_without_cutting_sections(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_text
@@ -236,11 +266,14 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         for heading in ("4) 주도 종목", "5) 로테이션", "6) 매매 관점", "한줄 판단:"):
             self.assertIn(heading, text)
         self.assertIn("AAA1", text)
+        self.assertIn("AAA2", text)
         self.assertIn("전일종가 대비 현재 강세", text)
         self.assertIn("전일 정규장 종가 대비 현재가", text)
         self.assertIn("스토캐스틱 Slow", text)
+        self.assertGreaterEqual(text.count("스토캐스틱 Slow"), 2)
         self.assertNotIn("[truncated]", text)
-        self.assertLessEqual(len(text), 1200)
+        self.assertGreater(len(text), 1200)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
     def test_oil_vix_alert_signature_and_text_focus_on_triggers(self) -> None:
         from scripts.run_sector_strength_alerts import build_alert_signature, build_alert_text
@@ -413,6 +446,31 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertNotIn("QQQ", text)
         self.assertNotIn("시장 레짐", text)
 
+
+
+    def test_build_alert_text_surfaces_flow_proxy_line(self) -> None:
+        from scripts.run_sector_strength_alerts import build_alert_text
+
+        text = build_alert_text({
+            "mode": "sector_strength",
+            "summary": "장중 테마 강약: 반도체 주도",
+            "collected_at": "2026-04-30T13:35:00+00:00",
+            "focus": [
+                "장 분위기: 중립 / SPY 보합",
+                "수급 proxy: 반도체/AI칩 기관성 유입 의심 / 거래대금 .7B / 상승비율 80.0% / SPY 대비 +2.30% / 5m AMD +1.20%, NVDA +0.80% / VWAP 위 3종목",
+                "강한 테마: 반도체/AI칩 평균 +2.30% / 상승비율 80.0% / 거래대금 .7B / 주도 AMD +6.00%, NVDA +4.00%",
+                "약한 테마: AI/빅테크/인프라 평균 -0.20% / 상승비율 40.0% / 주도 MSFT +0.10%",
+                "테마별 대장주: • 반도체: AMD +6.00% 06.00 | RSI 64(+4), MACD 0.50/0.30 h+0.20(+0.05), 스토캐스틱 Slow 78/70(+8), BB 85%(+5) 상단근접",
+                "로테이션 해석: 반도체/AI칩 내부 CPU/서버/PC칩로 자금 이동",
+            ],
+            "next_actions": ["기관성 유입 의심은 거래대금/VWAP/상대강도 기반 proxy로만 보고 단정 금지"],
+        })
+
+        self.assertIn("- 수급: 반도체/AI칩 기관성 유입 의심", text)
+        self.assertIn("VWAP 위 3종목", text)
+        self.assertIn("6) 매매 관점", text)
+        self.assertIn("단정 금지", text)
+        self.assertLessEqual(len(text), SECTOR_ALERT_COMPACT_LIMIT)
 
 if __name__ == "__main__":
     unittest.main()

@@ -254,6 +254,264 @@ class YfinanceDataTest(unittest.TestCase):
         self.assertEqual(pack["quote"]["pct_change_5m"], 0.46)
         self.assertEqual(pack["quote"]["pct_change_15m"], 2.01)
 
+    def test_toss_wts_quote_pack_uses_day_market_price_and_base_change(self):
+        import json
+        from unittest.mock import Mock
+
+        payload = {
+            "result": [
+                {"productCode": "US20210825002", "close": 27.2, "base": 26.5, "session": "DAY_MARKET", "volume": 1234}
+            ]
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_toss_wts_quote_packs
+
+            packs = fetch_toss_wts_quote_packs(["RKLB"])
+
+        self.assertTrue(packs["RKLB"]["available"])
+        self.assertEqual(packs["RKLB"]["source"], "toss_wts_stock_prices")
+        self.assertEqual(packs["RKLB"]["quote"]["price"], 27.2)
+        self.assertEqual(packs["RKLB"]["quote"]["previous_close"], 26.5)
+        self.assertEqual(packs["RKLB"]["quote"]["pct_change"], 2.64)
+        self.assertEqual(packs["RKLB"]["quote"]["session_label"], "토스 데이마켓/주간거래")
+        self.assertEqual(packs["RKLB"]["quote"]["pct_change_basis"], "Toss base 대비")
+        self.assertFalse(packs["RKLB"]["quote"]["is_stale_regular_close"])
+
+    def test_yahoo_chart_quote_pack_uses_previous_close_during_regular_session(self):
+        import json
+        from unittest.mock import Mock
+
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NMS",
+                            "marketState": "REGULAR",
+                            "regularMarketPrice": 208.34,
+                            "previousClose": 196.66,
+                            "chartPreviousClose": 196.66,
+                            "regularMarketTime": 1777558200,
+                            "currentTradingPeriod": {
+                                "regular": {"start": 1777555800, "end": 1777579200},
+                                "pre": {"start": 1777541400, "end": 1777555800},
+                                "post": {"start": 1777579200, "end": 1777593600},
+                            },
+                        },
+                        "timestamp": [1777558080, 1777558140, 1777558200],
+                        "indicators": {"quote": [{"close": [207.8, 208.1, 208.34], "volume": [100, 200, 300]}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("NVDA")
+
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["quote"]["price"], 208.34)
+        self.assertEqual(pack["quote"]["previous_close"], 196.66)
+        self.assertEqual(pack["quote"]["pct_change"], 5.94)
+        self.assertEqual(pack["quote"]["regular_market_price"], 208.34)
+        self.assertEqual(pack["quote"]["vwap"], 208.17)
+        self.assertEqual(pack["quote"]["vwap_position_pct"], 0.08)
+
+    def test_yahoo_chart_quote_pack_adds_intraday_rsi_and_bollinger_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [float(value) for value in range(100, 121)]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["rsi14"], 100.0)
+        self.assertEqual(quote["bollinger_mid"], 110.5)
+        self.assertEqual(quote["bollinger_upper"], 122.03)
+        self.assertEqual(quote["bollinger_lower"], 98.97)
+        self.assertEqual(quote["bollinger_position_pct"], 91.2)
+        self.assertEqual(quote["bollinger_state"], "상단권")
+
+    def test_yahoo_chart_quote_pack_adds_intraday_ichimoku_cloud_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [float(value) for value in range(100, 152)]
+        highs = [value + 1.0 for value in closes]
+        lows = [value - 1.0 for value in closes]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "high": highs, "low": lows, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["ichimoku_conversion"], 147.0)
+        self.assertEqual(quote["ichimoku_base"], 138.5)
+        self.assertEqual(quote["ichimoku_span_a"], 142.75)
+        self.assertEqual(quote["ichimoku_span_b"], 125.5)
+        self.assertEqual(quote["ichimoku_cloud_top"], 142.75)
+        self.assertEqual(quote["ichimoku_cloud_bottom"], 125.5)
+        self.assertEqual(quote["ichimoku_cloud_state"], "구름 위")
+
+    def test_yahoo_chart_quote_pack_adds_intraday_macd_and_stochastic_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [round(100 + idx + (0.02 * idx * idx), 2) for idx in range(60)]
+        highs = [value + 1.0 for value in closes]
+        lows = [value - 1.0 for value in closes]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "high": highs, "low": lows, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["macd_line"], 18.5)
+        self.assertEqual(quote["macd_signal"], 17.46)
+        self.assertEqual(quote["macd_histogram"], 1.04)
+        self.assertEqual(quote["macd_histogram_prev"], 1.04)
+        self.assertEqual(quote["macd_histogram_delta"], 0.01)
+        self.assertEqual(quote["macd_state"], "상방")
+        self.assertEqual(quote["stochastic_k"], 97.6)
+        self.assertEqual(quote["stochastic_d"], 97.6)
+        self.assertEqual(quote["stochastic_k_delta"], 0.0)
+        self.assertEqual(quote["stochastic_d_delta"], 0.0)
+        self.assertEqual(quote["stochastic_state"], "과열")
+        self.assertEqual(quote["rsi14"], 100.0)
+        self.assertEqual(quote["rsi14_delta"], 0.0)
+        self.assertEqual(quote["bollinger_bandwidth_pct"], 34.5)
+        self.assertEqual(quote["bollinger_bandwidth_delta"], -0.1)
+
+    def test_yahoo_chart_quote_pack_uses_slow_stochastic_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [100, 102, 101, 103, 105, 104, 106, 108, 107, 109, 111, 110, 112, 114, 113, 115, 107, 116, 108, 117]
+        highs = [value + 1.0 for value in closes]
+        lows = [value - 1.0 for value in closes]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "high": highs, "low": lows, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["stochastic_k"], 73.6)
+        self.assertEqual(quote["stochastic_d"], 67.5)
+        self.assertEqual(quote["stochastic_k_delta"], 18.9)
+        self.assertEqual(quote["stochastic_d_delta"], 0.5)
+        self.assertEqual(quote["stochastic_state"], "중립")
+
     def test_quote_pack_uses_only_fast_quote_fields_for_intraday_alerts(self):
         fake_yfinance = types.SimpleNamespace(Ticker=_FakeQuoteOnlyTicker)
         with patch.dict(sys.modules, {"yfinance": fake_yfinance}):

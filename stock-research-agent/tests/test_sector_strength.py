@@ -132,6 +132,33 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertIn("wti_5m_spike", report["alerts"])
         self.assertTrue(any("분봉 급등" in line and "VIX 5m +5.80%" in line and "WTI 5m +1.30%" in line for line in report["focus_lines"]))
 
+    def test_sector_strength_report_surfaces_intraday_vix_wti_spikes(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"symbol": "SPY", "price": 500.0, "previous_close": 501.0, "pct_change_5m": -0.4, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "^IXIC": {"symbol": "^IXIC", "price": 17000.0, "previous_close": 17020.0, "pct_change_5m": -0.5, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "SOXX": {"symbol": "SOXX", "price": 220.0, "previous_close": 221.0, "pct_change_5m": -0.8, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "BTC-USD": {"symbol": "BTC-USD", "price": 100000.0, "previous_close": 99500.0, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "^VIX": {"symbol": "^VIX", "price": 18.4, "previous_close": 17.9, "pct_change_5m": 5.0, "pct_change_15m": 6.2, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "CL=F": {"symbol": "CL=F", "price": 81.0, "previous_close": 80.8, "pct_change_5m": 0.7, "pct_change_15m": 1.2, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "RKLB": {"symbol": "RKLB", "price": 30.0, "previous_close": 28.0, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "LUNR": {"symbol": "LUNR", "price": 12.6, "previous_close": 12.0, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-05-08T13:35:00+00:00")
+        focus_text = "\n".join(report["focus_lines"])
+        action_text = "\n".join(report["next_actions"])
+
+        self.assertIn("분봉 리스크:", focus_text)
+        self.assertIn("VIX 5m", focus_text)
+        self.assertIn("pt", focus_text)
+        self.assertIn("WTI 15m +1.20%", focus_text)
+        self.assertIn("NASDAQ 5m -0.50%", focus_text)
+        self.assertIn("SPY 5m -0.40%", focus_text)
+        self.assertIn("VIX/WTI 분봉 리스크", action_text)
+        self.assertIn("추격", action_text)
+
     def test_market_regime_report_includes_score_and_trading_difficulty(self) -> None:
         from src.sector_strength import build_market_regime_report
 
@@ -529,6 +556,26 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertFalse(quotes["RKLB"]["is_stale_regular_close"])
         self.assertEqual(quotes["RKLB"]["rsi14"], 61.2)
 
+
+
+    def test_sector_strength_report_surfaces_flow_proxy_signals(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 500.0, "pct_change_5m": 0.05, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "AMD": {"price": 106.0, "previous_close": 100.0, "volume": 20_000_000, "pct_change_5m": 1.20, "vwap": 103.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "NVDA": {"price": 104.0, "previous_close": 100.0, "volume": 30_000_000, "pct_change_5m": 0.80, "vwap": 102.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "AVGO": {"price": 103.0, "previous_close": 100.0, "volume": 8_000_000, "pct_change_5m": 0.50, "vwap": 101.5, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "MU": {"price": 102.0, "previous_close": 100.0, "volume": 5_000_000, "pct_change_5m": 0.40, "vwap": 101.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes)
+
+        self.assertTrue(report["flow_proxies"]["active"])
+        self.assertIn("기관성 유입 의심", report["flow_proxies"]["summary"])
+        self.assertIn("반도체/AI칩", report["flow_proxies"]["summary"])
+        self.assertTrue(any(line.startswith("수급 proxy:") and "VWAP 위" in line for line in report["focus_lines"]))
+        self.assertTrue(any("기관성 유입 의심" in action and "단정 금지" in action for action in report["next_actions"]))
 
 if __name__ == "__main__":
     unittest.main()

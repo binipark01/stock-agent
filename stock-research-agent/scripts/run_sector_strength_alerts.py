@@ -173,10 +173,16 @@ def _sector_mood_lines(focus_lines: list[str]) -> list[str]:
             mood = _sector_mood_label(_strip_focus_prefix(text, "장 분위기:"))
             break
     etf = _focus_line(focus_lines, "ETF 시장 참고:")
+    risk_spike = _focus_line(focus_lines, "분봉 리스크:")
+    flow_proxy = _focus_line(focus_lines, "수급 proxy:")
     session = _focus_line(focus_lines, "세션:")
     lines: list[str] = []
     if mood:
         lines.append(f"- 상태: {mood}")
+    if risk_spike:
+        lines.append(f"- 리스크: {risk_spike}")
+    if flow_proxy:
+        lines.append(f"- 수급: {flow_proxy}")
     if session:
         lines.append(f"- 세션: {session}")
     if benchmark:
@@ -291,7 +297,7 @@ def _build_sector_telegram_text(payload: dict[str, Any]) -> str:
     previous_close_strength = _focus_line(focus_lines, "전일종가 대비 현재 강세:")
     rotation = _focus_line(focus_lines, "로테이션 해석:") or "뚜렷한 세부테마 내부 로테이션 없음"
     actions = [str(item).strip() for item in (payload.get("next_actions") or []) if str(item).strip()]
-    limit = min(1200, TELEGRAM_TEXT_LIMIT)
+    limit = min(1800, TELEGRAM_TEXT_LIMIT)
 
     def render(selected_movers: list[str], selected_theme_leaders: list[str] | None = None) -> str:
         rendered_theme_leaders = selected_theme_leaders if selected_theme_leaders is not None else theme_leaders
@@ -374,8 +380,8 @@ def _build_sector_telegram_text(payload: dict[str, Any]) -> str:
                 return text
         for count in range(min(len(theme_leaders), 7), 0, -1):
             ultra_compact = [
-                _compact_theme_leader(item, include_indicators=False)
-                for item in theme_leaders[:count]
+                _compact_theme_leader(item, include_indicators=(idx == 0))
+                for idx, item in enumerate(theme_leaders[:count])
             ]
             text = render([], ultra_compact)
             if len(text) <= limit:
@@ -410,7 +416,7 @@ def build_alert_text(payload: dict[str, Any]) -> str:
                 lines.append(f"- {text}")
 
     text = "\n".join(lines).strip()
-    if len(text) > min(1200, TELEGRAM_TEXT_LIMIT):
+    if len(text) > min(1800, TELEGRAM_TEXT_LIMIT):
         text = text[:1180].rstrip() + "\n...[truncated]"
     return text
 

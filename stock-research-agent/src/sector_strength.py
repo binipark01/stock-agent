@@ -442,6 +442,21 @@ def _quote_trading_value(quote: dict[str, Any]) -> float | None:
     return volume * price
 
 
+def _quote_vwap(quote: dict[str, Any]) -> float | None:
+    return _to_float(quote.get("vwap") or quote.get("intraday_vwap") or quote.get("avg_price"))
+
+
+def _quote_vwap_position_pct(quote: dict[str, Any]) -> float | None:
+    direct = _to_float(quote.get("vwap_position_pct") or quote.get("price_vs_vwap_pct"))
+    if direct is not None:
+        return direct
+    vwap = _quote_vwap(quote)
+    price = _to_float(quote.get("price") or quote.get("last") or quote.get("last_price") or quote.get("regularMarketPrice"))
+    if vwap in (None, 0) or price is None:
+        return None
+    return round(((price - float(vwap)) / float(vwap)) * 100, 2)
+
+
 def _korean_regime_label(label: str) -> str:
     return {"risk_off": "리스크오프", "risk_on": "리스크온", "neutral": "중립"}.get(label, label)
 
@@ -591,6 +606,9 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -> li
                 "price": quote.get("price"),
                 "volume": _quote_volume(quote),
                 "trading_value": _quote_trading_value(quote),
+                "pct_change_5m": _intraday_pct_change(quote, 5),
+                "vwap": _quote_vwap(quote),
+                "vwap_position_pct": _quote_vwap_position_pct(quote),
                 "source": quote.get("source"),
                 "timestamp": quote.get("timestamp") or quote.get("collected_at"),
                 "score_eligible": symbol not in excluded,
@@ -659,6 +677,9 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -
                 "price": quote.get("price"),
                 "volume": _quote_volume(quote),
                 "trading_value": _quote_trading_value(quote),
+                "pct_change_5m": _intraday_pct_change(quote, 5),
+                "vwap": _quote_vwap(quote),
+                "vwap_position_pct": _quote_vwap_position_pct(quote),
                 "source": quote.get("source"),
                 "timestamp": quote.get("timestamp") or quote.get("collected_at"),
                 "score_eligible": symbol not in excluded,
@@ -1008,6 +1029,186 @@ def _benchmark_context_line(normalized: dict[str, dict[str, Any]], collected_at:
     return f"장 분위기: {context}{suffix} / 기준시각 {collected_at}"
 
 
+def _intraday_pct_change(quote: dict[str, Any], minutes: int) -> float | None:
+    return _to_float(
+        quote.get(f"pct_change_{minutes}m")
+        or quote.get(f"change_{minutes}m_pct")
+        or quote.get(f"pct_{minutes}m")
+    )
+
+
+def _infer_point_change_from_pct(price: float | None, pct: float | None) -> float | None:
+    if price is None or pct is None:
+        return None
+    denominator = 1 + (pct / 100.0)
+    if denominator <= 0:
+        return None
+    previous = price / denominator
+    return round(price - previous, 2)
+
+
+def _format_vix_intraday_change(label: str, price: float | None, pct: float | None) -> str | None:
+    if pct is None:
+        return None
+    point_change = _infer_point_change_from_pct(price, pct)
+    if point_change is None:
+        return f"VIX {label} {_fmt_pct(pct)}"
+    return f"VIX {label} {point_change:+.2f}pt({_fmt_pct(pct)})"
+
+
+def _build_risk_spike_context(normalized: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    vix = normalized.get("^VIX", {})
+    wti = normalized.get("CL=F", {})
+    vix_price = _to_float(vix.get("price"))
+    vix_5m = _intraday_pct_change(vix, 5)
+    vix_15m = _intraday_pct_change(vix, 15)
+    wti_5m = _intraday_pct_change(wti, 5)
+    wti_15m = _intraday_pct_change(wti, 15)
+
+    parts: list[str] = []
+    triggers: list[str] = []
+    score = 0
+
+    vix_5m_pt = _infer_point_change_from_pct(vix_price, vix_5m)
+    vix_15m_pt = _infer_point_change_from_pct(vix_price, vix_15m)
+    if vix_5m is not None and (vix_5m >= 4.0 or (vix_5m_pt is not None and vix_5m_pt >= 0.6)):
+        formatted = _format_vix_intraday_change("5m", vix_price, vix_5m)
+        if formatted:
+            parts.append(formatted)
+        triggers.append("vix_5m_spike")
+        score += 2
+    elif vix_15m is not None and (vix_15m >= 7.0 or (vix_15m_pt is not None and vix_15m_pt >= 1.0)):
+        formatted = _format_vix_intraday_change("15m", vix_price, vix_15m)
+        if formatted:
+            parts.append(formatted)
+        triggers.append("vix_15m_spike")
+        score += 2
+
+    if wti_15m is not None and wti_15m >= 1.0:
+        parts.append(f"WTI 15m {_fmt_pct(wti_15m)}")
+        triggers.append("wti_15m_spike")
+        score += 2
+    elif wti_5m is not None and wti_5m >= 0.5:
+        parts.append(f"WTI 5m {_fmt_pct(wti_5m)}")
+        triggers.append("wti_5m_spike")
+        score += 1
+
+    market_parts: list[str] = []
+    for symbol, display in (("^IXIC", "NASDAQ"), ("SPY", "SPY"), ("SOXX", "SOXX")):
+        pct = _intraday_pct_change(normalized.get(symbol, {}), 5)
+        if pct is not None and pct <= -0.3:
+            market_parts.append(f"{display} 5m {_fmt_pct(pct)}")
+    if market_parts and triggers:
+        parts.append(", ".join(market_parts[:3]))
+        score += 1
+
+    if not triggers:
+        return {"active": False, "score": 0, "level": "stable", "triggers": [], "summary": ""}
+    level = "risk_off" if score >= 4 else "watch"
+    summary = " / ".join(parts)
+    return {
+        "active": True,
+        "score": score,
+        "level": level,
+        "triggers": triggers,
+        "summary": summary,
+        "vix_5m_change_pct": vix_5m,
+        "vix_5m_change_pt": vix_5m_pt,
+        "vix_15m_change_pct": vix_15m,
+        "vix_15m_change_pt": vix_15m_pt,
+        "wti_5m_change_pct": wti_5m,
+        "wti_15m_change_pct": wti_15m,
+    }
+
+
+def _build_flow_proxy_context(theme_baskets: list[dict[str, Any]], spy_pct: float) -> dict[str, Any]:
+    candidates: list[dict[str, Any]] = []
+    for theme in theme_baskets:
+        constituents = [row for row in theme.get("constituents", []) if row.get("score_eligible", True)]
+        if not constituents:
+            continue
+        trading_value = _to_float(theme.get("trading_value"))
+        breadth = _to_float(theme.get("breadth_positive_pct"))
+        relative = _to_float(theme.get("relative_to_spy_pct"))
+        avg_pct = _to_float(theme.get("average_pct_change"))
+        vwap_above = [row for row in constituents if (_to_float(row.get("vwap_position_pct")) is not None and _to_float(row.get("vwap_position_pct")) >= 0)]
+        intraday = sorted(
+            [row for row in constituents if _to_float(row.get("pct_change_5m")) is not None],
+            key=lambda row: _to_float(row.get("pct_change_5m")) or -999,
+            reverse=True,
+        )
+        if not any(value is not None for value in (trading_value, breadth, relative, avg_pct)):
+            continue
+        score = 0
+        signals: list[str] = []
+        if trading_value is not None and trading_value >= 500_000_000:
+            score += 2
+            signals.append("거래대금")
+        elif trading_value is not None and trading_value >= 100_000_000:
+            score += 1
+            signals.append("거래대금")
+        if breadth is not None and breadth >= 70:
+            score += 2
+            signals.append("breadth")
+        elif breadth is not None and breadth >= 60:
+            score += 1
+            signals.append("breadth")
+        if relative is not None and relative >= 1.0:
+            score += 2
+            signals.append("상대강도")
+        elif relative is not None and relative >= 0.5:
+            score += 1
+            signals.append("상대강도")
+        if avg_pct is not None and avg_pct >= 1.0:
+            score += 1
+        if vwap_above:
+            score += 1
+            signals.append("VWAP")
+        if intraday and (_to_float(intraday[0].get("pct_change_5m")) or 0) >= 0.5:
+            score += 1
+            signals.append("5m")
+        if score < 5:
+            continue
+        intraday_text = ", ".join(
+            f"{row['symbol']} {_fmt_pct(row.get('pct_change_5m'))}"
+            for row in intraday[:2]
+            if _to_float(row.get("pct_change_5m")) is not None
+        )
+        parts = [
+            f"{theme.get('name') or theme.get('key')} 기관성 유입 의심(거래대금/VWAP 기반 proxy)",
+            f"거래대금 {_fmt_trading_value(trading_value)}" if trading_value is not None else "거래대금 n/a",
+            f"상승비율 {breadth:.1f}%" if breadth is not None else "상승비율 n/a",
+            f"SPY 대비 {_fmt_pct(relative)}" if relative is not None else "SPY 대비 n/a",
+        ]
+        if intraday_text:
+            parts.append(f"5m {intraday_text}")
+        if vwap_above:
+            parts.append(f"VWAP 위 {len(vwap_above)}종목")
+        candidates.append(
+            {
+                "theme_key": theme.get("key"),
+                "theme_name": theme.get("name"),
+                "score": score,
+                "signals": sorted(set(signals)),
+                "summary": " / ".join(parts),
+                "trading_value": trading_value,
+                "breadth_positive_pct": breadth,
+                "relative_to_spy_pct": relative,
+                "vwap_above_count": len(vwap_above),
+                "intraday_leaders": intraday[:3],
+            }
+        )
+    candidates.sort(key=lambda row: (row.get("score") or 0, row.get("trading_value") or 0), reverse=True)
+    if not candidates:
+        return {"active": False, "candidates": [], "summary": ""}
+    return {
+        "active": True,
+        "candidates": candidates[:3],
+        "summary": candidates[0]["summary"],
+        "note": "거래대금/VWAP/상대강도 기반 수급 proxy이며 실제 기관 순매수 단정 아님",
+    }
+
+
 def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | None = None, top_n: int = 3) -> dict[str, Any]:
     normalized = {str(symbol).upper(): _normalize_quote(str(symbol), raw) for symbol, raw in (quotes or {}).items()}
     collected_at = collected_at or next((str(q.get("timestamp") or q.get("collected_at")) for q in normalized.values() if q.get("timestamp") or q.get("collected_at")), None) or datetime.now(timezone.utc).isoformat()
@@ -1041,6 +1242,8 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
     weak_sub_themes = sorted(sub_theme_baskets, key=lambda row: row["strength_score"])[:top_n]
     rotation_alerts = _build_rotation_alerts(strong_sub_themes, weak_sub_themes)
     regime = _classify_regime(normalized)
+    risk_spikes = _build_risk_spike_context(normalized)
+    flow_proxies = _build_flow_proxy_context(theme_baskets, spy_pct)
     regime_text = regime["korean_label"]
     leader = strong_themes[0]["name"] if strong_themes else (strong[0]["symbol"] if strong else "n/a")
     laggard = weak_themes[0]["name"] if weak_themes else (weak[0]["symbol"] if weak else "n/a")
@@ -1050,10 +1253,18 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
     summary_prefix = "장중 테마 강약" if theme_baskets else "장중 섹터 강약"
     focus_lines = [
         f"장 분위기: {regime_text} / {'; '.join(regime['signals'][:3])}",
+    ]
+    if risk_spikes.get("active") and risk_spikes.get("summary"):
+        focus_lines.append(f"분봉 리스크: {risk_spikes['summary']}")
+    focus_lines.extend([
         _theme_line_for("강한 테마", strong_themes),
         _theme_line_for("약한 테마", weak_themes),
         _sub_theme_line_for("강한 세부테마", strong_sub_themes),
         _sub_theme_line_for("약한 세부테마", weak_sub_themes),
+    ])
+    if flow_proxies.get("active") and flow_proxies.get("summary"):
+        focus_lines.append(f"수급 proxy: {flow_proxies['summary']}")
+    focus_lines.extend([
         _rotation_line(rotation_alerts),
         _theme_leader_status_line(normalized),
         _current_strength_against_previous_close_line(normalized),
@@ -1061,11 +1272,15 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
         _etf_context_line(strong, weak),
         _session_context_line(normalized),
         _benchmark_context_line(normalized, collected_at),
-    ]
+    ])
     next_actions = [
         "강한 테마가 SPY 대비 계속 우위인지 5분 뒤 재확인",
         "약한 테마 반등 매수는 VIX 안정과 SPY 회복 확인 후 판단",
     ]
+    if flow_proxies.get("active"):
+        next_actions.insert(0, "기관성 유입 의심은 거래대금/VWAP/상대강도 기반 proxy로만 보고 단정 금지")
+    if risk_spikes.get("active"):
+        next_actions.insert(0, "VIX/WTI 분봉 리스크 급등: 강한 테마도 추격보다 VWAP 눌림 대기")
     if rotation_alerts:
         top_rotation = rotation_alerts[0]
         next_actions.insert(
@@ -1093,6 +1308,8 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
         "rotation_alerts": rotation_alerts,
         "watchlist_movers": watchlist_movers[:10],
         "regime": regime,
+        "risk_spikes": risk_spikes,
+        "flow_proxies": flow_proxies,
         "focus_lines": focus_lines,
         "next_actions": next_actions,
         "quotes": normalized,

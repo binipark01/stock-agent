@@ -698,6 +698,10 @@ def _quote_from_yahoo_chart_result(symbol: str, result: dict[str, Any]) -> dict[
         if close_float is not None and volume_float is not None:
             trading_value_points.append(close_float * volume_float)
     trading_value = sum(trading_value_points) if trading_value_points else None
+    vwap = (trading_value / day_volume) if trading_value is not None and day_volume not in (None, 0) else None
+    vwap_position_pct = None
+    if price_float is not None and vwap not in (None, 0):
+        vwap_position_pct = ((price_float - float(vwap)) / float(vwap)) * 100
     quote = {
         "price": round(price_float, 2) if price_float is not None else None,
         "previous_close": round(previous_float, 2) if previous_float is not None else None,
@@ -707,6 +711,8 @@ def _quote_from_yahoo_chart_result(symbol: str, result: dict[str, Any]) -> dict[
         "pct_change_15m": _intraday_pct(points, 15),
         "volume": int(day_volume) if day_volume is not None else None,
         "trading_value": round(trading_value, 2) if trading_value is not None else None,
+        "vwap": round(vwap, 2) if vwap is not None else None,
+        "vwap_position_pct": round(vwap_position_pct, 2) if vwap_position_pct is not None else None,
         "currency": meta.get("currency"),
         "exchange": meta.get("exchangeName") or meta.get("exchange"),
         "timestamp": datetime.fromtimestamp(int(last_ts), timezone.utc).isoformat() if last_ts else None,
