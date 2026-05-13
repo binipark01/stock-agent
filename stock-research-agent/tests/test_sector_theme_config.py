@@ -7,6 +7,11 @@ from src.sector_strength import DEFAULT_SECTOR_STRENGTH_SYMBOLS
 class SectorThemeConfigTest(unittest.TestCase):
     def test_default_symbol_universe_is_assembled_from_config_module(self):
         self.assertIn("SPY", config.BENCHMARK_SYMBOLS)
+        self.assertIn("^IXIC", config.BENCHMARK_SYMBOLS)
+        self.assertIn("BTC-USD", config.BENCHMARK_SYMBOLS)
+        self.assertIn("CL=F", config.BENCHMARK_SYMBOLS)
+        self.assertIn("^VIX", config.BENCHMARK_SYMBOLS)
+        self.assertNotIn("QQQ", config.BENCHMARK_SYMBOLS)
         self.assertIn("XLK", config.CORE_SECTOR_ETFS)
         self.assertIn("SMH", config.THEME_ETFS)
         self.assertIn("space_aerospace", config.USER_THEME_BASKETS)

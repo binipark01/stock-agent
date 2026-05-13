@@ -11,6 +11,13 @@
     "space": ["RKLB", "LUNR", "RDW", "ASTS", "PL", "BKSY", "RCAT", "JOBY", "ACHR", "SATS", "GSAT"],
     "quantum": ["IONQ", "RGTI", "QBTS", "QUBT", "ARQQ", "LAES", "BTQ"],
     "healthcare": ["HIMS", "TDOC", "OSCR", "RXRX", "LLY", "NVO", "PFE", "UNH"],
-    "biotech_later": ["XBI", "IBB"]
+    "biotech_later": ["XBI", "IBB"],
+    "krx_stockcrew_semiconductors": ["005930.KS", "000660.KS", "042700.KS", "095340.KQ", "403870.KQ", "240810.KQ", "007660.KS", "222800.KQ", "399720.KQ", "394280.KQ"],
+    "krx_stockcrew_battery": ["373220.KS", "006400.KS", "247540.KQ", "003670.KS", "078600.KQ", "348370.KQ", "020150.KS"],
+    "krx_stockcrew_power_infra": ["267260.KS", "298040.KS", "006260.KS", "001440.KS", "010120.KS", "103590.KS", "034020.KS", "052690.KS"],
+    "krx_stockcrew_defense": ["012450.KS", "064350.KS", "079550.KS", "047810.KS", "272210.KS"],
+    "krx_stockcrew_shipbuilding": ["329180.KS", "042660.KS", "010140.KS", "071970.KS", "014620.KQ", "023160.KQ", "017960.KS", "033500.KQ"],
+    "krx_stockcrew_robotics": ["454910.KS", "277810.KQ", "058610.KQ", "108490.KQ", "117730.KQ", "348340.KQ"],
+    "krx_stockcrew_leaders": ["005930.KS", "000660.KS", "042700.KS", "095340.KQ", "403870.KQ", "240810.KQ", "007660.KS", "222800.KQ", "399720.KQ", "394280.KQ", "373220.KS", "006400.KS", "247540.KQ", "003670.KS", "078600.KQ", "348370.KQ", "020150.KS", "267260.KS", "298040.KS", "006260.KS", "001440.KS", "010120.KS", "103590.KS", "034020.KS", "052690.KS", "012450.KS", "064350.KS", "079550.KS", "047810.KS", "272210.KS", "329180.KS", "042660.KS", "010140.KS", "071970.KS", "014620.KQ", "023160.KQ", "017960.KS", "033500.KQ", "454910.KS", "277810.KQ", "058610.KQ", "108490.KQ", "117730.KQ", "348340.KQ"]
   }
 }
