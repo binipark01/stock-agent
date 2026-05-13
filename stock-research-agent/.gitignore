@@ -6,7 +6,7 @@
 config/kiwoom.env
 config/kiwoom.*.env
 config/private/
-data/kiwoom_token.json
+data/kiwoom_token*.json
 data/toss_stock_codes.json
 
 # Local caches / runtime artifacts
@@ -19,3 +19,13 @@ data/threads_profile_cache/
 data/threads_view_*.json
 data/threads_view_profiles/
 docs/references/threads-view-scan-*.md
+
+# Misrouted local probes / Windows cache paths
+hermes_probe.txt
+C:/
+C:/**
+data/*.db
+config/*appkey*.txt
+config/*secretkey*.txt
+config/*token*.txt
+config/*password*.txt

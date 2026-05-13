@@ -1,0 +1,558 @@
+{
+  "manju_close_bet": {
+    "name": "만쥬식 종가배팅",
+    "description": "주도테마/거래대금/고점권/수급/뉴스 지속성을 묶어 종가배팅 후보를 고른다.",
+    "filters": [
+      {
+        "label": "거래대금 100위 이내",
+        "field": "trade_value_rank",
+        "op": "<=",
+        "value": 100
+      },
+      {
+        "label": "당일 +3% 이상",
+        "field": "change_pct",
+        "op": ">=",
+        "value": 3
+      },
+      {
+        "label": "종가/현재가 고점권",
+        "field": "close_position_pct",
+        "op": ">=",
+        "value": 70
+      },
+      {
+        "label": "테마 강도 확인",
+        "field": "theme_strength_score",
+        "op": ">=",
+        "value": 2
+      },
+      {
+        "label": "프로그램 순매수",
+        "field": "program_net_buy",
+        "op": ">",
+        "value": 0
+      },
+      {
+        "any": [
+          {
+            "label": "외국인 순매수",
+            "field": "foreign_net_buy",
+            "op": ">",
+            "value": 0
+          },
+          {
+            "label": "기관 순매수",
+            "field": "institution_net_buy",
+            "op": ">",
+            "value": 0
+          }
+        ]
+      }
+    ],
+    "exclude": [
+      {
+        "label": "관리종목",
+        "field": "is_management_stock",
+        "op": "==",
+        "value": true
+      },
+      {
+        "label": "투자주의/경고",
+        "field": "is_investment_warning",
+        "op": "==",
+        "value": true
+      },
+      {
+        "label": "가격상승/수급이탈",
+        "field": "price_up_flow_divergence",
+        "op": "==",
+        "value": true
+      },
+      {
+        "label": "프로그램 강매도",
+        "field": "program_net_buy",
+        "op": "<",
+        "value": -500000
+      }
+    ],
+    "score": [
+      {
+        "label": "거래대금 30위 이내",
+        "field": "trade_value_rank",
+        "op": "<=",
+        "value": 30,
+        "points": 3
+      },
+      {
+        "label": "대장주 1순위",
+        "field": "theme_leader_rank",
+        "op": "==",
+        "value": 1,
+        "points": 3
+      },
+      {
+        "label": "주도테마 강함",
+        "field": "theme_strength_score",
+        "op": ">=",
+        "value": 3,
+        "points": 3
+      },
+      {
+        "label": "고점권 유지",
+        "field": "close_position_pct",
+        "op": ">=",
+        "value": 85,
+        "points": 2
+      },
+      {
+        "label": "외국인 순매수",
+        "field": "foreign_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 2
+      },
+      {
+        "label": "기관 순매수",
+        "field": "institution_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 2
+      },
+      {
+        "label": "프로그램 순매수",
+        "field": "program_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 2
+      },
+      {
+        "label": "뉴스 모멘텀",
+        "field": "news_momentum",
+        "op": ">=",
+        "value": 1,
+        "points": 2
+      }
+    ],
+    "labels": [
+      {
+        "min_score": 15,
+        "label": "종가베팅 후보"
+      },
+      {
+        "min_score": 10,
+        "label": "관찰/소액"
+      },
+      {
+        "min_score": 7,
+        "label": "익일 확인"
+      },
+      {
+        "min_score": 0,
+        "label": "버림"
+      }
+    ]
+  },
+  "supply_accumulation": {
+    "name": "수급 축적",
+    "description": "외인/기관/프로그램 중복 순매수와 개인 매도를 보는 검색식",
+    "filters": [
+      {
+        "label": "거래대금 150위 이내",
+        "field": "trade_value_rank",
+        "op": "<=",
+        "value": 150
+      },
+      {
+        "label": "주가 상승",
+        "field": "change_pct",
+        "op": ">",
+        "value": 0
+      },
+      {
+        "any": [
+          {
+            "label": "외국인 순매수",
+            "field": "foreign_net_buy",
+            "op": ">",
+            "value": 0
+          },
+          {
+            "label": "기관 순매수",
+            "field": "institution_net_buy",
+            "op": ">",
+            "value": 0
+          },
+          {
+            "label": "프로그램 순매수",
+            "field": "program_net_buy",
+            "op": ">",
+            "value": 0
+          }
+        ]
+      }
+    ],
+    "exclude": [
+      {
+        "label": "가격상승/수급이탈",
+        "field": "price_up_flow_divergence",
+        "op": "==",
+        "value": true
+      }
+    ],
+    "score": [
+      {
+        "label": "외국인 순매수",
+        "field": "foreign_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 2
+      },
+      {
+        "label": "기관 순매수",
+        "field": "institution_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 2
+      },
+      {
+        "label": "프로그램 순매수",
+        "field": "program_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 2
+      },
+      {
+        "label": "개인 매도 물량 흡수",
+        "field": "individual_net_buy",
+        "op": "<",
+        "value": 0,
+        "points": 1
+      },
+      {
+        "label": "거래량 증가",
+        "field": "volume_ratio",
+        "op": ">=",
+        "value": 1.5,
+        "points": 1
+      }
+    ],
+    "labels": [
+      {
+        "min_score": 6,
+        "label": "수급 강함"
+      },
+      {
+        "min_score": 3,
+        "label": "수급 관찰"
+      },
+      {
+        "min_score": 0,
+        "label": "약함"
+      }
+    ]
+  },
+  "theme_leader": {
+    "name": "테마 대장",
+    "description": "테마 안에서 돈/상승률/뉴스 본진을 같이 보는 대장주 검색식",
+    "filters": [
+      {
+        "label": "테마 강도 확인",
+        "field": "theme_strength_score",
+        "op": ">=",
+        "value": 2
+      },
+      {
+        "label": "거래대금 50위 이내",
+        "field": "trade_value_rank",
+        "op": "<=",
+        "value": 50
+      },
+      {
+        "label": "테마 내 1~2등",
+        "field": "theme_leader_rank",
+        "op": "<=",
+        "value": 2
+      }
+    ],
+    "exclude": [],
+    "score": [
+      {
+        "label": "테마 1등",
+        "field": "theme_leader_rank",
+        "op": "==",
+        "value": 1,
+        "points": 4
+      },
+      {
+        "label": "거래대금 20위 이내",
+        "field": "trade_value_rank",
+        "op": "<=",
+        "value": 20,
+        "points": 3
+      },
+      {
+        "label": "뉴스 본진",
+        "field": "news_momentum",
+        "op": ">=",
+        "value": 2,
+        "points": 2
+      },
+      {
+        "label": "신고가/돌파",
+        "field": "breakout",
+        "op": "==",
+        "value": true,
+        "points": 2
+      }
+    ],
+    "labels": [
+      {
+        "min_score": 8,
+        "label": "대장 확인"
+      },
+      {
+        "min_score": 5,
+        "label": "대장 후보"
+      },
+      {
+        "min_score": 0,
+        "label": "대장 아님"
+      }
+    ]
+  },
+  "theme_pairing": {
+    "name": "부대장/짝짓기",
+    "description": "대장 이후 따라붙는 진짜 부대장 후보",
+    "filters": [
+      {
+        "label": "같은 테마 반응",
+        "field": "theme_strength_score",
+        "op": ">=",
+        "value": 2
+      },
+      {
+        "label": "부대장권",
+        "field": "theme_leader_rank",
+        "op": ">=",
+        "value": 2
+      },
+      {
+        "label": "부대장권 상단",
+        "field": "theme_leader_rank",
+        "op": "<=",
+        "value": 5
+      },
+      {
+        "label": "거래대금 150위 이내",
+        "field": "trade_value_rank",
+        "op": "<=",
+        "value": 150
+      }
+    ],
+    "exclude": [
+      {
+        "label": "테마 확산 실패",
+        "field": "theme_breadth",
+        "op": "<",
+        "value": 2
+      }
+    ],
+    "score": [
+      {
+        "label": "대장 연동",
+        "field": "leader_correlation",
+        "op": ">=",
+        "value": 0.6,
+        "points": 3
+      },
+      {
+        "label": "뒤따라 거래대금 증가",
+        "field": "volume_ratio",
+        "op": ">=",
+        "value": 1.5,
+        "points": 2
+      },
+      {
+        "label": "고점권 유지",
+        "field": "close_position_pct",
+        "op": ">=",
+        "value": 70,
+        "points": 2
+      },
+      {
+        "label": "수급 플러스",
+        "field": "program_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 1
+      }
+    ],
+    "labels": [
+      {
+        "min_score": 7,
+        "label": "진짜 부대장"
+      },
+      {
+        "min_score": 4,
+        "label": "후발 관찰"
+      },
+      {
+        "min_score": 0,
+        "label": "짝짓기 약함"
+      }
+    ]
+  },
+  "momentum_continuation": {
+    "name": "급등 continuation",
+    "description": "많이 올라도 더 가는 장에서 연속성 후보를 찾는다.",
+    "filters": [
+      {
+        "label": "3~5일 누적상승",
+        "field": "recent_5d_pct",
+        "op": ">=",
+        "value": 10
+      },
+      {
+        "label": "거래대금 100위 이내",
+        "field": "trade_value_rank",
+        "op": "<=",
+        "value": 100
+      },
+      {
+        "label": "고점권 유지",
+        "field": "close_position_pct",
+        "op": ">=",
+        "value": 65
+      }
+    ],
+    "exclude": [
+      {
+        "label": "장대양봉 중심선 이탈",
+        "field": "above_prior_big_candle_mid",
+        "op": "==",
+        "value": false
+      },
+      {
+        "label": "가격상승/수급이탈",
+        "field": "price_up_flow_divergence",
+        "op": "==",
+        "value": true
+      }
+    ],
+    "score": [
+      {
+        "label": "최근 강한 상승",
+        "field": "recent_5d_pct",
+        "op": ">=",
+        "value": 20,
+        "points": 3
+      },
+      {
+        "label": "거래량 유지",
+        "field": "volume_ratio",
+        "op": ">=",
+        "value": 1.2,
+        "points": 2
+      },
+      {
+        "label": "테마 동반상승",
+        "field": "theme_breadth",
+        "op": ">=",
+        "value": 3,
+        "points": 2
+      },
+      {
+        "label": "NXT/시간외 유지",
+        "field": "session_continuation",
+        "op": "==",
+        "value": true,
+        "points": 2
+      },
+      {
+        "label": "수급 이탈 없음",
+        "field": "price_up_flow_divergence",
+        "op": "==",
+        "value": false,
+        "points": 1
+      }
+    ],
+    "labels": [
+      {
+        "min_score": 8,
+        "label": "연속성 강함"
+      },
+      {
+        "min_score": 5,
+        "label": "눌림대기"
+      },
+      {
+        "min_score": 0,
+        "label": "연속성 약함"
+      }
+    ]
+  },
+  "risk_avoid": {
+    "name": "위험 제외",
+    "description": "개인받이/수급이탈/관리·주의 종목을 빨리 버린다.",
+    "filters": [],
+    "exclude": [
+      {
+        "label": "관리종목",
+        "field": "is_management_stock",
+        "op": "==",
+        "value": true
+      },
+      {
+        "label": "투자주의/경고",
+        "field": "is_investment_warning",
+        "op": "==",
+        "value": true
+      },
+      {
+        "label": "가격상승/수급이탈",
+        "field": "price_up_flow_divergence",
+        "op": "==",
+        "value": true
+      },
+      {
+        "label": "외국인 강매도",
+        "field": "foreign_net_buy",
+        "op": "<",
+        "value": -500000
+      },
+      {
+        "label": "프로그램 강매도",
+        "field": "program_net_buy",
+        "op": "<",
+        "value": -500000
+      }
+    ],
+    "score": [
+      {
+        "label": "개인만 매수",
+        "field": "individual_net_buy",
+        "op": ">",
+        "value": 0,
+        "points": 2
+      },
+      {
+        "label": "윗꼬리 과다",
+        "field": "upper_wick_pct",
+        "op": ">=",
+        "value": 5,
+        "points": 2
+      }
+    ],
+    "labels": [
+      {
+        "min_score": 1,
+        "label": "위험주의"
+      },
+      {
+        "min_score": 0,
+        "label": "위험 낮음"
+      }
+    ]
+  }
+}

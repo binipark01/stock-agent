@@ -6,6 +6,7 @@ from src.repository import get_connection
 from src.tossinvest_data import (
     build_toss_day_market_quote_report,
     build_toss_market_brief,
+    extract_toss_stock_code_from_markdown,
     fetch_toss_day_market_quote,
     map_toss_news_item,
     parse_toss_day_market_markdown,
@@ -43,6 +44,26 @@ $142.87
 거래량 319,968
 """
 
+RDW_STOCK_PAGE_SAMPLE = """
+Title: 레드와이어(RDW) 실시간 주가를 확인해보세요
+# 13,719원 +7.36% | 레드와이어
+레드와이어 RDW
+13,719원 $9.33
+지난 정규장보다 +941원 (7.36%)
+01:30:10
+거래량 6,787,335
+"""
+
+RDW_SEARCH_SAMPLE = """
+[레드와이어(RDW) 실시간 주가](https://www.tossinvest.com/stocks/US20210903005)
+[레드와이어 커뮤니티](https://www.tossinvest.com/stocks/US20210903005/community?feedSortType=POPULAR)
+"""
+
+ACME_SEARCH_SAMPLE = """
+[에이씨미(ACME) 실시간 주가](https://www.tossinvest.com/stocks/US20260101001)
+[에이씨미 커뮤니티](https://www.tossinvest.com/stocks/US20260101001/community?feedSortType=POPULAR)
+"""
+
 
 class TossinvestParserTest(unittest.TestCase):
     def test_parse_toss_index_markdown(self) -> None:
@@ -75,6 +96,33 @@ class TossinvestParserTest(unittest.TestCase):
         self.assertIn("US20200930014", seen_urls[0])
         self.assertEqual(quote["usd_price"], 142.87)
 
+    def test_extract_toss_stock_code_from_search_markdown(self) -> None:
+        self.assertEqual(extract_toss_stock_code_from_markdown(RDW_SEARCH_SAMPLE, "RDW"), "US20210903005")
+
+    def test_fetch_toss_day_market_quote_resolves_unknown_stock_code(self) -> None:
+        seen_quote_urls = []
+        seen_resolver_urls = []
+
+        def fake_quote_fetch(url: str) -> str:
+            seen_quote_urls.append(url)
+            return RDW_STOCK_PAGE_SAMPLE
+
+        def fake_resolver_fetch(url: str) -> str:
+            seen_resolver_urls.append(url)
+            return ACME_SEARCH_SAMPLE
+
+        quote = fetch_toss_day_market_quote("ACME", fetcher=fake_quote_fetch, resolver_fetcher=fake_resolver_fetch, cache_path=False)
+
+        self.assertTrue(quote["available"])
+        self.assertEqual(quote["symbol"], "ACME")
+        self.assertEqual(quote["toss_code"], "US20260101001")
+        self.assertEqual(quote["usd_price"], 9.33)
+        self.assertEqual(quote["krw_price"], 13719)
+        self.assertEqual(quote["change_pct"], 7.36)
+        self.assertEqual(quote["last_trade_time"], "01:30:10")
+        self.assertIn("stocks/US20260101001", seen_quote_urls[0])
+        self.assertTrue(seen_resolver_urls)
+
     def test_build_toss_day_market_quote_report_from_runtime_markdown(self) -> None:
         report = build_toss_day_market_quote_report(
             "PLTR 데이마켓 가격",
@@ -84,6 +132,49 @@ class TossinvestParserTest(unittest.TestCase):
         self.assertIn("PLTR $142.87", report["summary"])
         self.assertIn("호가·스프레드", " ".join(report["next_actions"]))
         self.assertIn("Yahoo", " ".join(report["next_actions"]))
+
+    def test_build_toss_day_market_quote_report_can_resolve_multiple_symbols(self) -> None:
+        def fake_quote_fetch(url: str) -> str:
+            if "US20210903005" in url:
+                return RDW_STOCK_PAGE_SAMPLE
+            if "US20200930014" in url:
+                return DAY_MARKET_SAMPLE
+            raise AssertionError(url)
+
+        def fake_resolver_fetch(url: str) -> str:
+            return RDW_SEARCH_SAMPLE
+
+        report = build_toss_day_market_quote_report(
+            "RDW PLTR 토스 주가",
+            symbols=["RDW", "PLTR"],
+            runtime_context={"toss_fetcher": fake_quote_fetch, "toss_resolver_fetcher": fake_resolver_fetch, "toss_code_cache_path": False},
+        )
+
+        self.assertIn("RDW $9.33", report["summary"])
+        self.assertEqual([quote["symbol"] for quote in report["quotes"]], ["RDW", "PLTR"])
+        self.assertTrue(any("RDW" in line and "13,719원" in line for line in report["focus_lines"]))
+        self.assertTrue(any("PLTR" in line and "$142.87" in line for line in report["focus_lines"]))
+
+    def test_build_toss_day_market_quote_report_uses_resolver_fetcher_for_unknown_symbols(self) -> None:
+        seen_resolver_urls = []
+
+        def fake_quote_fetch(url: str) -> str:
+            self.assertIn("US20260101001", url)
+            return RDW_STOCK_PAGE_SAMPLE
+
+        def fake_resolver_fetch(url: str) -> str:
+            seen_resolver_urls.append(url)
+            return ACME_SEARCH_SAMPLE
+
+        report = build_toss_day_market_quote_report(
+            "ACME 토스 스냅샷",
+            symbols=["ACME"],
+            runtime_context={"toss_fetcher": fake_quote_fetch, "toss_resolver_fetcher": fake_resolver_fetch, "toss_code_cache_path": False},
+        )
+
+        self.assertIn("ACME $9.33", report["summary"])
+        self.assertEqual(report["quotes"][0]["toss_code"], "US20260101001")
+        self.assertTrue(seen_resolver_urls)
 
     def test_parse_toss_news_feed_markdown(self) -> None:
         items = parse_toss_news_feed_markdown(NEWS_SAMPLE)

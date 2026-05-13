@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote_plus
 
 import requests
 
@@ -26,6 +28,7 @@ except ImportError:  # direct script execution
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 JINA_PREFIX = "https://r.jina.ai/http://"
+DEFAULT_TOSS_STOCK_CODE_CACHE_PATH = Path(__file__).resolve().parents[1] / "data" / "toss_stock_codes.json"
 TOSS_US_INDEX_PAGES = {
     "COMP.NAI": ("나스닥", "https://www.tossinvest.com/indices/COMP.NAI"),
     "SPX.CBI": ("S&P 500", "https://www.tossinvest.com/indices/SPX.CBI"),
@@ -35,6 +38,9 @@ TOSS_US_STOCK_CODES = {
     # Observed public Toss stock-id for PLTR order page. This is not the ISIN.
     # Jina-readable URL pattern: https://www.tossinvest.com/stocks/US20200930014/order
     "PLTR": "US20200930014",
+    # Observed public Toss base page for Redwire.
+    # Jina-readable URL pattern: https://www.tossinvest.com/stocks/US20210903005
+    "RDW": "US20210903005",
 }
 TOSS_NEWS_FEED_URL = "https://www.tossinvest.com/feed/news"
 US_NEWS_SYMBOL_KEYWORDS = {
@@ -72,6 +78,90 @@ def _parse_number(value: str) -> float:
     if cleaned in {"-", "--", ""}:
         return 0.0
     return float(cleaned)
+
+
+def _load_toss_stock_code_cache(cache_path: str | Path | bool | None = DEFAULT_TOSS_STOCK_CODE_CACHE_PATH) -> dict[str, str]:
+    if cache_path is False or cache_path is None:
+        return {}
+    path = Path(cache_path)
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {str(symbol).upper(): str(code) for symbol, code in data.items() if str(code).startswith("US")}
+
+
+def _save_toss_stock_code_cache(cache: dict[str, str], cache_path: str | Path | bool | None = DEFAULT_TOSS_STOCK_CODE_CACHE_PATH) -> None:
+    if cache_path is False or cache_path is None:
+        return
+    path = Path(cache_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(dict(sorted(cache.items())), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def extract_toss_stock_code_from_markdown(markdown: str, symbol: str) -> str | None:
+    upper_symbol = symbol.upper()
+    code_pattern = re.compile(r"(?:https?://www\.tossinvest\.com)?/stocks/(US[A-Z0-9]{8,24})", re.IGNORECASE)
+    candidates: list[tuple[int, str]] = []
+    for match in code_pattern.finditer(markdown):
+        code = match.group(1).upper()
+        window = markdown[max(0, match.start() - 350) : min(len(markdown), match.end() + 350)]
+        window_upper = window.upper()
+        score = 1
+        if upper_symbol in window_upper:
+            score += 20
+        if f"({upper_symbol})" in window_upper or f" {upper_symbol}" in window_upper:
+            score += 5
+        if "/COMMUNITY" not in window_upper and "/ORDER" not in window_upper:
+            score += 1
+        candidates.append((score, code))
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    if candidates[0][0] > 1 or len({code for _, code in candidates}) == 1:
+        return candidates[0][1]
+    return None
+
+
+def _toss_stock_search_urls(symbol: str) -> list[str]:
+    query = quote_plus(f"site:tossinvest.com/stocks {symbol} TossInvest")
+    return [
+        f"https://duckduckgo.com/html/?q={query}",
+        f"https://www.bing.com/search?q={query}",
+    ]
+
+
+def resolve_toss_stock_code(
+    symbol: str,
+    fetcher=None,
+    cache_path: str | Path | bool | None = DEFAULT_TOSS_STOCK_CODE_CACHE_PATH,
+    code_map: dict[str, str] | None = None,
+) -> str | None:
+    upper_symbol = symbol.upper()
+    merged_code_map = {**TOSS_US_STOCK_CODES, **(code_map or {})}
+    if merged_code_map.get(upper_symbol):
+        return merged_code_map[upper_symbol]
+
+    cache = _load_toss_stock_code_cache(cache_path)
+    if cache.get(upper_symbol):
+        return cache[upper_symbol]
+
+    fetch = fetcher or _fetch_jina_markdown
+    for search_url in _toss_stock_search_urls(upper_symbol):
+        try:
+            markdown = fetch(search_url)
+        except Exception:
+            continue
+        code = extract_toss_stock_code_from_markdown(markdown, upper_symbol)
+        if code:
+            cache[upper_symbol] = code
+            _save_toss_stock_code_cache(cache, cache_path)
+            return code
+    return None
 
 
 def parse_toss_index_markdown(index_code: str, markdown: str) -> dict:
@@ -141,15 +231,20 @@ def parse_toss_day_market_markdown(markdown: str, symbol: str | None = None, sou
     usd_match = re.search(r"\$\s*([+-]?[\d,]+(?:\.\d+)?)", text)
     krw_match = re.search(r"([+-]?[\d,]+)\s*원", text)
     session_match = re.search(r"(데이마켓|주간거래|주간장|데이장)", text)
-    session_label = session_match.group(1) if session_match else "데이마켓"
+    session_label = session_match.group(1) if session_match else ("정규장" if "지난 정규장" in text else "데이마켓")
 
     change_krw = None
     change_pct = None
     session_line = ""
     for raw_line in markdown.splitlines():
-        if session_label in raw_line:
+        if session_label in raw_line or (session_label == "정규장" and "지난 정규장" in raw_line):
             session_line = raw_line.strip()
             break
+    if not session_line:
+        for raw_line in markdown.splitlines():
+            if any(keyword in raw_line for keyword in ["지난 정규장", "전일", "정규장보다"]):
+                session_line = raw_line.strip()
+                break
     if session_line:
         change_match = re.search(r"([+-]?[\d,]+)\s*원", session_line)
         pct_match = re.search(r"([+-]?[\d,]+(?:\.\d+)?)\s*%", session_line)
@@ -183,9 +278,16 @@ def parse_toss_day_market_markdown(markdown: str, symbol: str | None = None, sou
     }
 
 
-def fetch_toss_day_market_quote(symbol: str, stock_code: str | None = None, fetcher=None) -> dict:
+def fetch_toss_day_market_quote(
+    symbol: str,
+    stock_code: str | None = None,
+    fetcher=None,
+    resolver_fetcher=None,
+    cache_path: str | Path | bool | None = DEFAULT_TOSS_STOCK_CODE_CACHE_PATH,
+    code_map: dict[str, str] | None = None,
+) -> dict:
     upper_symbol = symbol.upper()
-    toss_code = stock_code or TOSS_US_STOCK_CODES.get(upper_symbol)
+    toss_code = stock_code or resolve_toss_stock_code(upper_symbol, fetcher=resolver_fetcher, cache_path=cache_path, code_map=code_map)
     if not toss_code:
         return {
             "symbol": upper_symbol,
@@ -193,7 +295,7 @@ def fetch_toss_day_market_quote(symbol: str, stock_code: str | None = None, fetc
             "reason": "unknown_toss_stock_code",
             "source_label": "Toss/Jina",
         }
-    source_url = f"https://www.tossinvest.com/stocks/{toss_code}/order"
+    source_url = f"https://www.tossinvest.com/stocks/{toss_code}"
     try:
         markdown = (fetcher or _fetch_jina_markdown)(source_url)
         quote = parse_toss_day_market_markdown(markdown, symbol=upper_symbol, source_url=source_url)
@@ -253,7 +355,14 @@ def build_toss_day_market_quote_report(request: str, symbols: list[str] | None =
             quote = parse_toss_day_market_markdown(markdown_map[upper_symbol], symbol=upper_symbol, source_url=f"runtime://{upper_symbol}")
             quote["available"] = True
         else:
-            quote = fetch_toss_day_market_quote(upper_symbol, stock_code=code_map.get(upper_symbol), fetcher=runtime_context.get("toss_fetcher"))
+            quote = fetch_toss_day_market_quote(
+                upper_symbol,
+                stock_code=code_map.get(upper_symbol),
+                fetcher=runtime_context.get("toss_fetcher"),
+                resolver_fetcher=runtime_context.get("toss_resolver_fetcher"),
+                cache_path=runtime_context.get("toss_code_cache_path", DEFAULT_TOSS_STOCK_CODE_CACHE_PATH),
+                code_map=code_map,
+            )
         quotes.append(quote)
 
     available_quotes = [quote for quote in quotes if quote.get("available", True) and quote.get("usd_price") is not None]

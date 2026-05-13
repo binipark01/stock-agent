@@ -72,6 +72,57 @@ class WatchlistsModuleTest(unittest.TestCase):
         self.assertEqual(filtered["portfolio"], [])
         self.assertEqual(filtered["lists"], {"optical": ["AAOI", "LITE"]})
 
+    def test_stockcrew_krx_theme_aliases_normalize_to_yfinance_symbols(self) -> None:
+        from src.watchlists import normalize_symbols
+
+        self.assertEqual(
+            normalize_symbols(["한미반도체", "에코프로비엠", "HD현대일렉트릭", "LIG넥스원", "두산로보틱스"]),
+            ["042700.KS", "247540.KQ", "267260.KS", "079550.KS", "454910.KS"],
+        )
+
+    def test_infer_watchlist_scope_supports_stockcrew_krx_theme_aliases(self) -> None:
+        from src.watchlists import filter_watchlist_scope, flatten_watchlist_symbols, infer_watchlist_scope
+
+        watchlist_data = {"watchlist": [], "portfolio": [], "lists": {"krx_stockcrew_leaders": ["005930.KS", "000660.KS"]}}
+
+        scope = infer_watchlist_scope("주식크루 국장 테마 리스트만 봐줘", watchlist_data)
+        self.assertEqual(scope, "krx_stockcrew_leaders")
+        self.assertEqual(flatten_watchlist_symbols(filter_watchlist_scope(watchlist_data, scope)), ["005930.KS", "000660.KS"])
+        self.assertEqual(infer_watchlist_scope("한국장 대장섹터만", watchlist_data), "krx_stockcrew_leaders")
+        sub_theme_data = {
+            "watchlist": [],
+            "portfolio": [],
+            "lists": {
+                "krx_stockcrew_leaders": ["005930.KS", "000660.KS"],
+                "krx_stockcrew_semiconductors": ["005930.KS"],
+                "krx_stockcrew_shipbuilding": ["329180.KS"],
+            },
+        }
+        self.assertEqual(infer_watchlist_scope("국장 반도체만 봐줘", sub_theme_data), "krx_stockcrew_semiconductors")
+        self.assertEqual(infer_watchlist_scope("국장 조선만 봐줘", sub_theme_data), "krx_stockcrew_shipbuilding")
+
+    def test_repo_watchlist_contains_stockcrew_krx_theme_lists(self) -> None:
+        from src.watchlists import load_watchlist
+
+        watchlist = load_watchlist(Path(__file__).resolve().parents[1] / "config" / "watchlist.json")
+        lists = watchlist["lists"]
+
+        self.assertIn("krx_stockcrew_leaders", lists)
+        self.assertIn("krx_stockcrew_semiconductors", lists)
+        self.assertIn("krx_stockcrew_battery", lists)
+        self.assertIn("krx_stockcrew_power_infra", lists)
+        self.assertIn("krx_stockcrew_defense", lists)
+        self.assertIn("krx_stockcrew_shipbuilding", lists)
+        self.assertIn("krx_stockcrew_robotics", lists)
+        self.assertIn("005930.KS", lists["krx_stockcrew_semiconductors"])
+        self.assertIn("000660.KS", lists["krx_stockcrew_semiconductors"])
+        self.assertIn("373220.KS", lists["krx_stockcrew_battery"])
+        self.assertIn("267260.KS", lists["krx_stockcrew_power_infra"])
+        self.assertIn("012450.KS", lists["krx_stockcrew_defense"])
+        self.assertIn("329180.KS", lists["krx_stockcrew_shipbuilding"])
+        self.assertIn("454910.KS", lists["krx_stockcrew_robotics"])
+        self.assertEqual(len(lists["krx_stockcrew_leaders"]), len(set(lists["krx_stockcrew_leaders"])))
+
     def test_build_watchlist_scan_ranks_movers_and_keeps_list_context(self) -> None:
         from src.watchlists import build_watchlist_scan
 

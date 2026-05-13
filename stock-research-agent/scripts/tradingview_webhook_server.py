@@ -5,6 +5,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -35,11 +36,12 @@ def _redact_request_log_message(message: str) -> str:
 def run_notify_command(notify_command: str, response: dict, timeout_seconds: int = 30) -> dict:
     """Run notify command and return a log/response-safe status summary."""
     try:
+        command = shlex.split(notify_command, posix=True)
         completed = subprocess.run(
-            notify_command,
+            command,
             input=json.dumps(response, ensure_ascii=False),
             text=True,
-            shell=True,
+            shell=False,
             timeout=timeout_seconds,
             check=False,
             capture_output=True,
