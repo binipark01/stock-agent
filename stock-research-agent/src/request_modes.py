@@ -50,6 +50,12 @@ def infer_mode(request: str, explicit_mode: str | None = None) -> str:
         return "oil_vix"
     if any(keyword in lowered for keyword in ["market regime", "시장 레짐", "장 레짐", "risk-on", "risk off", "risk-off", "리스크온", "리스크오프"]):
         return "market_regime"
+    if any(keyword in lowered for keyword in ["마감 복기", "장마감 복기", "장 후 복기", "장후 복기", "closing review", "closing_review"]):
+        return "closing_review"
+    if any(keyword in lowered for keyword in ["프리장 플랜", "프리마켓 플랜", "장전 플랜", "premarket plan", "premarket_plan"]):
+        return "premarket_plan"
+    if any(keyword in lowered for keyword in ["주도섹터 인텔리전스", "주도 섹터 인텔리전스", "섹터 인텔리전스", "sector intelligence", "sector_intelligence", "주도 지속성", "테마 지속성", "주도섹터 지속성"]):
+        return "sector_intelligence"
     if any(keyword in lowered for keyword in ["sector strength", "sector_strength", "섹터 강약", "섹터별", "강한 섹터", "약한 섹터", "장중 섹터", "주도섹터", "주도 섹터", "주도 테마", "테마 랭킹"]):
         return "sector_strength"
     if any(keyword in lowered for keyword in ["openbb", "open bb", "오픈비비", "오픈 bb"]):

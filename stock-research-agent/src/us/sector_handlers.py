@@ -4,9 +4,11 @@ from __future__ import annotations
 from typing import Any
 
 try:
+    from .sector.intelligence import build_closing_review, build_premarket_plan, build_sector_intelligence_report
     from .sector.strength import build_market_regime_report, build_oil_vix_report, build_sector_strength_report, fetch_sector_strength_quotes
     from ..watchlists import build_watchlist_scan, filter_watchlist_scope, flatten_watchlist_symbols, infer_watchlist_scope
 except ImportError:  # direct script execution
+    from us.sector.intelligence import build_closing_review, build_premarket_plan, build_sector_intelligence_report
     from us.sector.strength import build_market_regime_report, build_oil_vix_report, build_sector_strength_report, fetch_sector_strength_quotes
     from watchlists import build_watchlist_scan, filter_watchlist_scope, flatten_watchlist_symbols, infer_watchlist_scope
 
@@ -85,6 +87,63 @@ def build_us_sector_response(
             "data": {"oil_vix": oil_vix_report},
         }
 
+
+    if mode in {"sector_intelligence", "premarket_plan", "closing_review"}:
+        watchlist_symbols = list((watchlist_data or {}).get("watchlist") or []) if isinstance(watchlist_data, dict) else []
+        portfolio_symbols = list((watchlist_data or {}).get("portfolio") or []) if isinstance(watchlist_data, dict) else []
+        sector_report = payload.get("sector_report") or runtime_context.get("sector_report")
+        if mode == "closing_review":
+            open_report = payload.get("open_report") or runtime_context.get("open_report") or sector_report
+            close_report = payload.get("close_report") or runtime_context.get("close_report") or sector_report
+            if close_report is None:
+                sector_quotes = payload.get("sector_quotes") or runtime_context.get("sector_quotes")
+                if not sector_quotes:
+                    sector_quotes = fetch_sector_strength_quotes()
+                close_report = build_sector_strength_report(
+                    sector_quotes,
+                    collected_at=payload.get("collected_at") or runtime_context.get("collected_at"),
+                )
+            if open_report is None:
+                open_report = close_report
+            intelligence_report = build_closing_review(open_report, close_report)
+            data_key = "closing_review"
+        else:
+            if sector_report is None:
+                sector_quotes = payload.get("sector_quotes") or runtime_context.get("sector_quotes")
+                if not sector_quotes:
+                    sector_quotes = fetch_sector_strength_quotes()
+                sector_report = build_sector_strength_report(
+                    sector_quotes,
+                    collected_at=payload.get("collected_at") or runtime_context.get("collected_at"),
+                )
+            if mode == "premarket_plan":
+                intelligence_report = build_premarket_plan(
+                    sector_report,
+                    previous_report=payload.get("previous_report") or runtime_context.get("previous_report"),
+                    social_report=payload.get("social_report") or runtime_context.get("social_report"),
+                    watchlist=payload.get("watchlist") or watchlist_symbols,
+                )
+                data_key = "premarket_plan"
+            else:
+                intelligence_report = build_sector_intelligence_report(
+                    sector_report,
+                    flow_events=payload.get("flow_events") or runtime_context.get("flow_events"),
+                    social_report=payload.get("social_report") or runtime_context.get("social_report"),
+                    watchlist=payload.get("watchlist") or watchlist_symbols,
+                    portfolio=payload.get("portfolio") or portfolio_symbols,
+                )
+                data_key = "sector_intelligence"
+        features = list(dict.fromkeys([*runtime_context.get("features", []), data_key, "sector_strength"]))
+        return {
+            "agent": "stock-research-agent",
+            "mode": mode,
+            "summary": intelligence_report["summary"],
+            "symbols": symbols,
+            "focus": intelligence_report["focus_lines"],
+            "next_actions": intelligence_report["next_actions"],
+            "features": features,
+            "data": {data_key: intelligence_report},
+        }
 
     if mode == "sector_strength":
         sector_quotes = payload.get("sector_quotes") or runtime_context.get("sector_quotes")
