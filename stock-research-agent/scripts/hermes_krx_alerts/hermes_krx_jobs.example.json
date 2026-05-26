@@ -1,0 +1,30 @@
+﻿{
+  "jobs": [
+    {
+      "name": "KRX 수급 알림 - 정규장 (LLM review gate)",
+      "schedule": { "kind": "cron", "expr": "*/5 8-15 * * 1-5", "display": "*/5 8-15 * * 1-5" },
+      "schedule_display": "*/5 8-15 * * 1-5",
+      "enabled": true,
+      "state": "scheduled",
+      "script": "krx_regular_alert_review_packet.py",
+      "no_agent": false,
+      "deliver": "telegram:<KR_CHAT_ID>",
+      "telegram_env_file": "<PATH_TO_TELEGRAM_ENV>",
+      "telegram_market_scope": "KR",
+      "prompt": "Use the production prompt from local Hermes jobs.json; do not commit tokens or chat ids."
+    },
+    {
+      "name": "KRX 수급 알림 - 장후/SOR (LLM review gate)",
+      "schedule": { "kind": "cron", "expr": "*/5 16-20 * * 1-5", "display": "*/5 16-20 * * 1-5" },
+      "schedule_display": "*/5 16-20 * * 1-5",
+      "enabled": true,
+      "state": "scheduled",
+      "script": "krx_afterhours_alert_review_packet.py",
+      "no_agent": false,
+      "deliver": "telegram:<KR_CHAT_ID>",
+      "telegram_env_file": "<PATH_TO_TELEGRAM_ENV>",
+      "telegram_market_scope": "KR",
+      "prompt": "Use the production prompt from local Hermes jobs.json; do not commit tokens or chat ids. The script gates weekend and post-20:00 runs with wakeAgent=false."
+    }
+  ]
+}

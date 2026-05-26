@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_TOKEN_CACHE = PROJECT_ROOT / "data" / "kiwoom_token.json"
 DEFAULT_PROD_TOKEN_CACHE = PROJECT_ROOT / "data" / "kiwoom_token_prod.json"
 DEFAULT_MOCK_TOKEN_CACHE = PROJECT_ROOT / "data" / "kiwoom_token_mock.json"
-DEFAULT_ENV_PATH = PROJECT_ROOT / "config" / "kiwoom.env"
+DEFAULT_ENV_PATH = Path(os.environ.get("KIWOOM_ENV_FILE") or (PROJECT_ROOT / "config" / "kiwoom.env"))
 
 
 @dataclass(frozen=True, repr=False)
@@ -307,6 +307,21 @@ class KiwoomRestClient:
             raise RuntimeError("failed to issue Kiwoom token")
         return self._token
 
+    def _drop_cached_token(self) -> None:
+        self._token = None
+        self._expires_dt = None
+        cache_path = self._cache_path()
+        if not cache_path:
+            return
+        try:
+            cache_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _is_invalid_token_response(data: dict[str, Any]) -> bool:
+        return str(data.get("return_code") or "") == "3" and "Token" in str(data.get("return_msg") or "")
+
     def post_tr(
         self,
         api_id: str,
@@ -332,6 +347,18 @@ class KiwoomRestClient:
         )
         response.raise_for_status()
         data = response.json()
+        if self._is_invalid_token_response(data):
+            self._drop_cached_token()
+            token = self.get_token()
+            headers["authorization"] = f"{self._token_type} {token}"
+            response = self.session.post(
+                f"{self.config.rest_base_url}{endpoint_path}",
+                json=body,
+                headers=headers,
+                timeout=self.config.timeout,
+            )
+            response.raise_for_status()
+            data = response.json()
         response_headers = dict(getattr(response, "headers", {}) or {})
         return KiwoomTRResult(
             data=data,

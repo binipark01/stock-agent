@@ -39,7 +39,7 @@ class FakeSession:
         self.responses = []
 
     def post(self, url, json=None, headers=None, timeout=None):
-        self.posts.append({"url": url, "json": json, "headers": headers or {}, "timeout": timeout})
+        self.posts.append({"url": url, "json": dict(json or {}), "headers": dict(headers or {}), "timeout": timeout})
         if not self.responses:
             raise AssertionError("no fake response queued")
         return self.responses.pop(0)
@@ -261,6 +261,43 @@ class KiwoomClientTest(unittest.TestCase):
         self.assertEqual(result.data["bid_req_base_tm"], "093000")
         self.assertEqual(result.cont_yn, "Y")
         self.assertEqual(result.next_key, "NEXT123")
+
+    def test_post_tr_refreshes_cached_token_when_kiwoom_rejects_it(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            cache_path = Path(tmpdir) / "token.json"
+            cache_path.write_text(
+                json.dumps(
+                    {
+                        "env": "prod",
+                        "token_type": "Bearer",
+                        TOKEN_KEY: "stale-token",
+                        "expires_dt": "20991231235959",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            session = FakeSession()
+            session.responses.append(FakeResponse({"return_code": 3, "return_msg": "인증에 실패했습니다[8005:Token이 유효하지 않습니다]"}))
+            session.responses.append(
+                FakeResponse(
+                    {
+                        "token_type": "Bearer",
+                        TOKEN_KEY: "fresh-token",
+                        "expires_dt": "20991231235959",
+                    }
+                )
+            )
+            session.responses.append(FakeResponse({"return_code": 0, "cur_prc": "+2090000", "flu_rt": "+7.68"}))
+            config = KiwoomConfig(env="prod", appkey="app-key", secretkey="secret-key", token_cache=cache_path)
+            client = KiwoomRestClient(config, session=session)
+
+            result = client.post_tr("ka10001", "/api/dostk/stkinfo", {"stk_cd": "000660_AL"})
+
+            self.assertEqual(result.data["cur_prc"], "+2090000")
+            self.assertEqual(session.posts[0]["headers"]["authorization"], "Bearer stale-token")
+            self.assertEqual(session.posts[2]["headers"]["authorization"], "Bearer fresh-token")
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            self.assertEqual(cached[TOKEN_KEY], "fresh-token")
 
 
 if __name__ == "__main__":
