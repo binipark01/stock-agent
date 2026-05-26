@@ -875,13 +875,44 @@ def build_regular_text() -> str:
                 break
         return ', '.join(rows)
 
-    def pick_theme_leaders(members, direction='+', limit=3):
+    CAPTAIN_PRIORITY = {
+        '반도체': ('005930','삼성전자','000660','SK하이닉스','042700','한미반도체','000990','DB하이텍','089030','테크윙','095340','ISC','353200','대덕전자','222800','심텍','036930','주성엔지니어링'),
+        '반도체/제조': ('005930','삼성전자','000660','SK하이닉스','000990','DB하이텍'),
+        '반도체/HBM': ('000660','SK하이닉스','005930','삼성전자','042700','한미반도체','353200','대덕전자','095340','ISC','222800','심텍','036930','주성엔지니어링'),
+        '자동차': ('005380','현대차','000270','기아','012330','현대모비스','086280','현대글로비스','018880','한온시스템','204320','HL만도'),
+        '자동차/물류': ('005380','현대차','000270','기아','012330','현대모비스','086280','현대글로비스','018880','한온시스템','204320','HL만도'),
+        '2차전지': ('373220','LG에너지솔루션','006400','삼성SDI','247540','에코프로비엠','086520','에코프로','003670','포스코퓨처엠','096770','SK이노베이션','278280','천보'),
+        '방산': ('012450','한화에어로스페이스','047810','한국항공우주','329180','한화오션','079550','LIG넥스원','064350','현대로템'),
+        '조선': ('329180','한화오션','009540','HD한국조선해양','010140','삼성중공업','042660','한화엔진'),
+    }
+
+    def captain_priority(x, theme=None):
+        code=str(x.get('code') or '').strip()
+        name=str(x.get('name') or '').strip()
+        theme_text=str(theme or '').strip()
+        keys=[]
+        if theme_text:
+            keys.append(theme_text)
+            if '/' in theme_text:
+                keys.append(theme_text.split('/', 1)[0])
+        best=0
+        for group_idx, key in enumerate(keys):
+            priority=CAPTAIN_PRIORITY.get(key) or ()
+            for idx, item in enumerate(priority):
+                if code == item or name == item:
+                    best=max(best, 1000 - group_idx * 100 - idx)
+        return best
+
+    def pick_theme_leaders(members, direction='+', limit=3, theme=None):
         primary=[x for x in members if not direction or price_mark(x) == direction]
         fallback=list(members)
         pool=primary or fallback
 
         def cap_key(x):
             return (market_cap_for(x), int(x.get('score') or 0), abs(pct_value(x)))
+
+        def captain_key(x):
+            return (captain_priority(x, theme), market_cap_for(x), int(x.get('score') or 0), abs(pct_value(x)))
 
         def mover_key(x):
             pct=pct_value(x)
@@ -893,6 +924,7 @@ def build_regular_text() -> str:
                 move=abs(pct)
             return (move, int(x.get('score') or 0), market_cap_for(x))
 
+        priority_rows=[x for x in sorted(pool, key=captain_key, reverse=True) if captain_priority(x, theme) > 0]
         large_caps=sorted(pool, key=cap_key, reverse=True)
         movers=sorted(pool, key=mover_key, reverse=True)
         large_cap_slots=max(1, min(2, limit // 2 if limit > 2 else 1))
@@ -909,7 +941,10 @@ def build_regular_text() -> str:
                 if len(picked) >= max_items or len(picked) >= limit:
                     break
 
-        add_from(large_caps, large_cap_slots)
+        if priority_rows:
+            add_from(priority_rows, limit)
+        else:
+            add_from(large_caps, large_cap_slots)
         add_from(movers, limit)
         if not picked:
             add_from(sorted(fallback, key=mover_key, reverse=True), limit)
@@ -956,11 +991,11 @@ def build_regular_text() -> str:
         return text.split('/', 1)[1] if '/' in text else text
 
     def root_theme_lines(root, groups, direction='+'):
-        label='주도주' if direction == '+' else '약세 주도'
+        label='대장주' if direction == '+' else '약세 대장주'
         members=[]
         for g in groups:
             members.extend(g.get('members') or [])
-        leaders=pick_theme_leaders(members, direction, 6)
+        leaders=pick_theme_leaders(members, direction, 6, root)
         rows=[f'- {root}']
         rows.extend(leader_stock_detail_lines(leaders, '  ', label))
         rows.append('  - 세부 테마')
@@ -972,7 +1007,7 @@ def build_regular_text() -> str:
             if not sub_members:
                 rows.append('      - 없음')
                 continue
-            sub_leaders=pick_theme_leaders(sub_members, direction, 3)
+            sub_leaders=pick_theme_leaders(sub_members, direction, 3, theme)
             rows.append(f'      - {label}: {leader_stock_summary(sub_leaders)}')
             shown={x.get('code') for x in sub_leaders}
             peers=[]
@@ -994,8 +1029,8 @@ def build_regular_text() -> str:
         if not members:
             rows.append('  - 없음')
             return rows
-        leaders=pick_theme_leaders(members, direction, max(2, limit))
-        leader_label='주도주' if direction == '+' else '약세 주도'
+        leaders=pick_theme_leaders(members, direction, max(2, limit), theme)
+        leader_label='대장주' if direction == '+' else '약세 대장주'
         rows.extend(leader_stock_detail_lines(leaders, '  ', leader_label))
         shown={x.get('code') for x in leaders}
         peers=[]
@@ -1085,7 +1120,7 @@ def build_regular_text() -> str:
             ]
         return [
             '- 확산형 강한 테마는 아직 약함',
-            '- 개별 주도주 중심',
+            '- 개별 대장주 중심',
         ]
 
     def stock_leader_lines(limit=4, exclude_codes=None, only_mark='+'):
@@ -1327,7 +1362,7 @@ def build_regular_text() -> str:
         '2) 약한 테마',
         *weak_lines[:WEAK_SECTION_LINE_LIMIT],
         '',
-        '3) 개별 주도주',
+        '3) 개별 대장주',
         *leader_lines[:24],
         '',
     ]).strip()
