@@ -1003,10 +1003,6 @@ def build_regular_text() -> str:
             theme=str(g.get('theme') or '')
             sub=sub_theme_label(theme)
             sub_members=[m for m in g.get('members', []) if m.get('name')]
-            rows.append(f'    - {sub}')
-            if not sub_members:
-                rows.append('      - 추가 종목: 없음')
-                continue
             additional=[]
             for m in sub_members:
                 code=m.get('code')
@@ -1018,9 +1014,9 @@ def build_regular_text() -> str:
                     emitted_sub_codes.add(code)
                 additional.append(f'{m["name"]}: {price_label(m)}')
             if additional:
-                rows.append('      - 추가 종목: {}'.format(', '.join(additional)))
+                rows.append('    - {}: {}'.format(sub, ', '.join(additional)))
             else:
-                rows.append(f'      - 추가 종목: 없음 - 위 {root} 대장주에 포함')
+                rows.append(f'    - {sub}: 추가 종목 없음 - 위 {root} 대장주에 포함')
         return rows
 
     def theme_lines(g, limit, direction='+'):
