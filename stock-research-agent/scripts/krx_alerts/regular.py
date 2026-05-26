@@ -491,12 +491,10 @@ def format_issue(item):
     title=clean_issue_title(item.get('title')) if isinstance(item, dict) else ''
     if not title:
         return ''
-    source=clean_issue_title(item.get('source')) if isinstance(item, dict) else ''
     prefix=issue_topic(title)
-    suffix=f' ({source})' if source else ''
     if prefix == '최신뉴스':
-        return f'{title}{suffix}'
-    return f'{prefix}: {title}{suffix}'
+        return title
+    return f'{prefix}: {title}'
 
 def build_regular_text() -> str:
     now = datetime.now().strftime('%H:%M')
