@@ -5,13 +5,13 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-REGULAR = Path(__file__).with_name('krx_regular_alert_text.py')
-CACHE = Path(__file__).with_name('krx_afterhours_alert_text.last.txt')
+REGULAR = Path(__file__).with_name('regular.py')
+CACHE = Path(__file__).with_name('afterhours.last.txt')
 
 def _load_regular():
-    spec = importlib.util.spec_from_file_location('krx_regular_alert_text', REGULAR)
+    spec = importlib.util.spec_from_file_location('krx_alert_regular', REGULAR)
     if spec is None or spec.loader is None:
-        raise RuntimeError('cannot load krx_regular_alert_text')
+        raise RuntimeError('cannot load regular alert builder')
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod

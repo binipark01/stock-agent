@@ -1,15 +1,15 @@
-﻿# Hermes KRX Telegram alerts
+﻿# KRX Telegram alerts
 
-운영용 Hermes KRX 알림 스크립트 복사본이다.
+운영용 KRX 텔레그램 알림 스크립트 복사본이다.
 
 ## 구성
 
-- `krx_regular_alert_text.py`: 정규장 알림 본문 생성
-- `krx_afterhours_alert_text.py`: 장후/SOR 알림 본문 생성
-- `krx_regular_alert_review_packet.py`: 정규장 LLM 검수 패킷 생성
-- `krx_afterhours_alert_review_packet.py`: 장후/SOR LLM 검수 패킷 생성 및 20:05 이후/주말 무음 처리
-- `krx_alert_review_packet_common.py`: LLM 검수 공통 패킷/진단 로직
-- `hermes_krx_jobs.example.json`: 비밀값 제거한 cron 예시
+- `regular.py`: 정규장 알림 본문 생성
+- `afterhours.py`: 장후/SOR 알림 본문 생성
+- `regular_review.py`: 정규장 LLM 검수 패킷 생성
+- `afterhours_review.py`: 장후/SOR LLM 검수 패킷 생성 및 20:05 이후/주말 무음 처리
+- `review_common.py`: LLM 검수 공통 패킷/진단 로직
+- `jobs.example.json`: 비밀값 제거한 cron 예시
 
 ## 운영 스케줄
 

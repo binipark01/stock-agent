@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 
-from krx_alert_review_packet_common import main
+from review_common import main
 
 
 def should_wake_afterhours(now: datetime | None = None) -> bool:
@@ -19,4 +19,4 @@ if __name__ == '__main__':
     if not should_wake_afterhours():
         print(json.dumps({'wakeAgent': False, 'reason': 'outside KRX afterhours alert window'}, ensure_ascii=False), flush=True)
         raise SystemExit(0)
-    raise SystemExit(main('afterhours', 'krx_afterhours_alert_text.py'))
+    raise SystemExit(main('afterhours', 'afterhours.py'))

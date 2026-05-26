@@ -31,9 +31,9 @@ for _kiwoom_env_path in KIWOOM_ENV_CANDIDATES:
     if _kiwoom_env_path.exists():
         os.environ.setdefault('KIWOOM_ENV_FILE', str(_kiwoom_env_path))
         break
-CACHE = Path(__file__).with_name('krx_regular_alert_text.last.txt')
-ERRLOG = Path(__file__).with_name('krx_regular_alert_text.err.txt')
-ISSUE_CANDIDATES = Path(__file__).with_name('krx_regular_alert_text.issue_candidates.json')
+CACHE = Path(__file__).with_name('regular.last.txt')
+ERRLOG = Path(__file__).with_name('regular.err.txt')
+ISSUE_CANDIDATES = Path(__file__).with_name('regular.issue_candidates.json')
 SKIP_NAME_TOKENS = ('KODEX','TIGER','ACE','SOL','KBSTAR','HANARO','레버리지','인버스','ETN','ETF')
 MAX_STRONG_THEMES = 5
 MAX_WEAK_THEMES = 3

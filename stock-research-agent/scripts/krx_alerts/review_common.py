@@ -114,7 +114,7 @@ def _load_data_env() -> dict[str, Any]:
 
 
 def _load_issue_candidates() -> dict[str, Any]:
-    path = SCRIPT_DIR / 'krx_regular_alert_text.issue_candidates.json'
+    path = SCRIPT_DIR / 'regular.issue_candidates.json'
     if not path.exists():
         return {'items': [], 'error': 'issue candidate sidecar missing'}
     try:
