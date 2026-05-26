@@ -994,30 +994,33 @@ def build_regular_text() -> str:
         for g in groups:
             members.extend(g.get('members') or [])
         leaders=pick_theme_leaders(members, direction, 6, root)
+        root_leader_codes={x.get('code') for x in leaders if x.get('code')}
         rows=[f'- {root}']
         rows.extend(leader_stock_detail_lines(leaders, '  ', label))
         rows.append('  - 세부 테마')
+        emitted_sub_codes=set(root_leader_codes)
         for g in groups:
             theme=str(g.get('theme') or '')
             sub=sub_theme_label(theme)
             sub_members=[m for m in g.get('members', []) if m.get('name')]
             rows.append(f'    - {sub}')
             if not sub_members:
-                rows.append('      - 없음')
+                rows.append('      - 추가 종목: 없음')
                 continue
-            sub_leaders=pick_theme_leaders(sub_members, direction, 3, theme)
-            rows.append(f'      - {label}: {leader_stock_summary(sub_leaders)}')
-            shown={x.get('code') for x in sub_leaders}
-            peers=[]
+            additional=[]
             for m in sub_members:
-                if m.get('code') in shown:
+                code=m.get('code')
+                if code and code in emitted_sub_codes:
                     continue
                 if price_mark(m) != direction:
                     continue
-                shown.add(m.get('code'))
-                peers.append(f'{m["name"]}: {price_label(m)}')
-            if peers:
-                rows.append('      - 동반: {}'.format(', '.join(peers)))
+                if code:
+                    emitted_sub_codes.add(code)
+                additional.append(f'{m["name"]}: {price_label(m)}')
+            if additional:
+                rows.append('      - 추가 종목: {}'.format(', '.join(additional)))
+            else:
+                rows.append(f'      - 추가 종목: 없음 - 위 {root} 대장주에 포함')
         return rows
 
     def theme_lines(g, limit, direction='+'):
