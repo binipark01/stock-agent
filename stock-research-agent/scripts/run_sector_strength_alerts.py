@@ -797,7 +797,7 @@ def _sector_issue_symbols(report: dict[str, Any], max_symbols: int) -> list[str]
             leaders = row.get("leaders")
             if not isinstance(leaders, list):
                 continue
-            for leader in leaders[:3]:
+            for leader in leaders:
                 if isinstance(leader, dict):
                     add(leader.get("symbol"))
                 if len(ordered) >= max_symbols:
@@ -1122,6 +1122,12 @@ def _llm_bool(value: Any) -> bool:
     return numeric is not None and numeric > 0
 
 
+def _llm_leader_count_bounds() -> tuple[int, int]:
+    minimum = _env_int("SECTOR_ALERT_LLM_MIN_LEADERS", 3, minimum=1, maximum=5)
+    maximum = _env_int("SECTOR_ALERT_LLM_MAX_LEADERS", 5, minimum=minimum, maximum=5)
+    return minimum, maximum
+
+
 def _leader_candidates_for_llm(row: dict[str, Any], candidate_limit: int) -> list[dict[str, Any]]:
     raw = row.get("leader_candidates")
     if not isinstance(raw, list) or not raw:
@@ -1190,6 +1196,7 @@ def _theme_news_for_llm(report: dict[str, Any], row: dict[str, Any]) -> str:
 def _llm_rerank_request_payload(report: dict[str, Any]) -> dict[str, Any]:
     max_themes = _env_int("SECTOR_ALERT_LLM_MAX_THEMES", 8, minimum=1, maximum=12)
     candidate_limit = _env_int("SECTOR_ALERT_LLM_CANDIDATE_LIMIT", 8, minimum=3, maximum=12)
+    min_leaders, max_leaders = _llm_leader_count_bounds()
     rows = report.get("theme_baskets")
     if not isinstance(rows, list) or not rows:
         rows = report.get("strong_themes")
@@ -1220,7 +1227,7 @@ def _llm_rerank_request_payload(report: dict[str, Any]) -> dict[str, Any]:
         )
         if len(themes) >= max_themes:
             break
-    return {"themes": themes}
+    return {"leader_selection": {"minimum": min_leaders, "maximum": max_leaders}, "themes": themes}
 
 
 def _extract_llm_text(payload: dict[str, Any]) -> str:
@@ -1265,17 +1272,22 @@ def _parse_llm_json(text: str) -> dict[str, Any]:
 
 
 def _llm_prompt_payload(request_payload: dict[str, Any]) -> str:
+    selection = request_payload.get("leader_selection") if isinstance(request_payload.get("leader_selection"), dict) else {}
+    min_leaders = int(selection.get("minimum") or 3)
+    max_leaders = int(selection.get("maximum") or 5)
     return json.dumps(
         {
-            "task": "각 테마에서 최종 대장주 최대 3개를 고르거나 재정렬해라.",
+            "task": f"각 테마에서 최종 대장주를 {min_leaders}~{max_leaders}개 고르거나 재정렬해라.",
             "rules": [
                 "후보에 없는 symbol은 절대 만들지 말 것",
                 "테마 대표성(theme_anchor), 오늘 등락률, 거래대금, 거래대금 전일대비 증가, 거래량 증가, theme_news/issue를 함께 판단",
                 "RSI가 높다는 이유만으로 감점하지 말 것",
                 "SPY 대비 상대강도는 판단 기준에서 제외",
                 "잡주성 급등보다 테마를 대표하면서 돈이 붙은 종목을 우선",
+                f"후보가 충분하면 {min_leaders}개 이상, 확실한 대장주가 더 있으면 {max_leaders}개까지 허용",
+                f"확신이 낮은 종목으로 억지로 {max_leaders}개를 채우지 말 것",
             ],
-            "return_schema": {"themes": [{"key": "theme key", "leaders": ["AAA", "BBB", "CCC"], "reason": "짧은 한국어 이유"}]},
+            "return_schema": {"themes": [{"key": "theme key", "leaders": ["AAA", "BBB", "CCC", "DDD"], "reason": "짧은 한국어 이유"}]},
             "input": request_payload,
         },
         ensure_ascii=False,
@@ -1286,6 +1298,7 @@ def _llm_prompt_payload(request_payload: dict[str, Any]) -> str:
 def _llm_system_prompt() -> str:
     return (
         "You rerank US stock theme leader candidates for a short market alert. "
+        "Choose 3 to 5 symbols when candidates allow it. "
         "Choose only symbols that are present in candidates. Return only valid JSON."
     )
 
@@ -1443,6 +1456,7 @@ def _apply_llm_leader_choices(report: dict[str, Any], llm_payload: dict[str, Any
     choices = llm_payload.get("themes")
     if not isinstance(choices, list):
         return 0
+    min_leaders, max_leaders = _llm_leader_count_bounds()
     choice_by_key: dict[str, list[str]] = {}
     reason_by_key: dict[str, str] = {}
     for item in choices:
@@ -1454,7 +1468,7 @@ def _apply_llm_leader_choices(report: dict[str, Any], llm_payload: dict[str, Any
             continue
         symbols = [str(symbol).upper().strip() for symbol in leaders if str(symbol).strip()]
         if symbols:
-            choice_by_key[key] = list(dict.fromkeys(symbols))
+            choice_by_key[key] = list(dict.fromkeys(symbols))[:max_leaders]
             if item.get("reason"):
                 reason_by_key[key] = str(item.get("reason"))
     if not choice_by_key:
@@ -1480,8 +1494,10 @@ def _apply_llm_leader_choices(report: dict[str, Any], llm_payload: dict[str, Any
                 if candidate and symbol not in seen:
                     selected.append(candidate)
                     seen.add(symbol)
+                if len(selected) >= max_leaders:
+                    break
             fallback = row.get("leader_candidates") if isinstance(row.get("leader_candidates"), list) else row.get("leaders")
-            if isinstance(fallback, list):
+            if len(selected) < min_leaders and isinstance(fallback, list):
                 for item in fallback:
                     if not isinstance(item, dict):
                         continue
@@ -1489,18 +1505,21 @@ def _apply_llm_leader_choices(report: dict[str, Any], llm_payload: dict[str, Any
                     if symbol and symbol not in seen:
                         selected.append(item)
                         seen.add(symbol)
-                    if len(selected) >= 3:
+                    if len(selected) >= min_leaders:
                         break
             if selected:
+                final_selected = selected[:max_leaders]
                 before = [str(item.get("symbol") or "").upper().strip() for item in row.get("leaders", []) if isinstance(item, dict)]
-                row["leaders"] = selected[:3]
+                row["leaders"] = final_selected
                 row["llm_leader_rerank"] = {
                     "model": model,
-                    "selected_symbols": [str(item.get("symbol") or "").upper().strip() for item in selected[:3]],
+                    "selected_symbols": [str(item.get("symbol") or "").upper().strip() for item in final_selected],
+                    "min_leaders": min_leaders,
+                    "max_leaders": max_leaders,
                     "reason": reason_by_key.get(key),
                 }
-                after = [str(item.get("symbol") or "").upper().strip() for item in selected[:3]]
-                if before[:3] != after:
+                after = [str(item.get("symbol") or "").upper().strip() for item in final_selected]
+                if before[:max_leaders] != after:
                     changed += 1
     return changed
 
@@ -1514,7 +1533,7 @@ def _theme_line_for_alert(prefix: str, rows: Any) -> str:
             continue
         leaders = ", ".join(
             f"{leader.get('symbol')} {_fmt_alert_pct(leader.get('pct_change'))}"
-            for leader in row.get("leaders", [])[:3]
+            for leader in row.get("leaders", [])
             if isinstance(leader, dict) and leader.get("symbol")
         )
         value_text = f" / 거래대금 {_fmt_alert_trading_value(row.get('trading_value'))}" if row.get("trading_value") is not None else ""
@@ -2148,7 +2167,7 @@ def _structured_theme_leader_detail_lookup(payload: dict[str, Any]) -> dict[str,
                 continue
             details = [
                 detail
-                for detail in (_format_structured_leader_detail(leader) for leader in leaders[:3] if isinstance(leader, dict))
+                for detail in (_format_structured_leader_detail(leader) for leader in leaders if isinstance(leader, dict))
                 if detail
             ]
             if details:

@@ -586,6 +586,7 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
                 {"symbol": "NVDA", "price": 110.0, "pct_change": 3.0, "trading_value": 500_000_000, "leader_score": 80.0, "leader_score_basis": {"theme_leader_rank": 100.0}},
                 {"symbol": "AMD", "price": 120.0, "pct_change": 4.0, "trading_value": 450_000_000, "leader_score": 70.0, "leader_score_basis": {"theme_leader_rank": 85.0}},
                 {"symbol": "MU", "price": 100.0, "pct_change": 4.0, "trading_value": 300_000_000, "leader_score": 60.0, "leader_score_basis": {"theme_leader_rank": 70.0}},
+                {"symbol": "INTC", "price": 40.0, "pct_change": 2.0, "trading_value": 250_000_000, "leader_score": 50.0, "leader_score_basis": {"theme_leader_rank": 55.0}},
             ],
         }
         semis["leaders"] = [semis["leader_candidates"][0], semis["leader_candidates"][3], semis["leader_candidates"][1]]
@@ -608,17 +609,26 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
             },
         }
 
-        with patch.dict("os.environ", {"SECTOR_ALERT_ENABLE_LLM_RERANK": "1", "SECTOR_ALERT_LLM_API_KEY": "unit-key"}), patch.object(
+        with patch.dict(
+            "os.environ",
+            {
+                "SECTOR_ALERT_ENABLE_LLM_RERANK": "1",
+                "SECTOR_ALERT_LLM_API_KEY": "unit-key",
+                "SECTOR_ALERT_LLM_MIN_LEADERS": "3",
+                "SECTOR_ALERT_LLM_MAX_LEADERS": "5",
+            },
+        ), patch.object(
             runner,
             "_call_llm_leader_rerank",
-            return_value={"_model": "unit-llm", "themes": [{"key": "semiconductors", "leaders": ["NVDA", "AMD", "SNDK"], "reason": "대표성과 뉴스"}]},
+            return_value={"_model": "unit-llm", "themes": [{"key": "semiconductors", "leaders": ["NVDA", "AMD", "SNDK", "MU", "INTC"], "reason": "대표성과 뉴스"}]},
         ) as llm_call:
             result = runner._rerank_sector_response_with_llm(response)
 
         llm_call.assert_called_once()
         leaders = result["data"]["sector_strength"]["strong_themes"][0]["leaders"]
-        self.assertEqual([row["symbol"] for row in leaders], ["NVDA", "AMD", "SNDK"])
-        self.assertIn("주도 NVDA +3.00%, AMD +4.00%, SNDK +8.00%", result["focus"][1])
+        self.assertEqual([row["symbol"] for row in leaders], ["NVDA", "AMD", "SNDK", "MU", "INTC"])
+        self.assertIn("주도 NVDA +3.00%, AMD +4.00%, SNDK +8.00%, MU +4.00%, INTC +2.00%", result["focus"][1])
+        self.assertEqual(result["data"]["sector_strength"]["strong_themes"][0]["llm_leader_rerank"]["max_leaders"], 5)
         self.assertEqual(result["data"]["sector_strength"]["llm_leader_rerank"]["changed_theme_count"], 1)
 
     def test_build_sector_response_does_not_enrich_symbol_issues_by_default(self) -> None:
