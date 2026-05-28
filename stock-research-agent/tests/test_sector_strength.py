@@ -19,6 +19,48 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertIn("RSI 24(-2)", oversold)
         self.assertIn("과매도권", oversold)
 
+    def test_volume_inline_text_keeps_zero_day_volume(self) -> None:
+        from src.sector_strength import _volume_inline_text
+
+        self.assertEqual(
+            _volume_inline_text({"day_volume": 0, "previous_volume": 1_000_000, "volume_vs_previous_pct": -100.0}),
+            " / 거래량 0/1.0M(-100.00%)",
+        )
+
+    def test_volume_inline_text_uses_positive_volume_when_day_volume_is_zero(self) -> None:
+        from src.sector_strength import _quote_volume_fields, _volume_inline_text
+
+        row = {
+            "day_volume": 0,
+            "volume": 2_500_000,
+            "previous_volume": 5_000_000,
+        }
+
+        self.assertEqual(_quote_volume_fields(row)["day_volume"], 2_500_000)
+        self.assertEqual(
+            _volume_inline_text(row),
+            " / 거래량 2.5M/5.0M(-50.00%)",
+        )
+
+    def test_previous_day_fields_use_last_completed_daily_row(self) -> None:
+        from src.sector_strength import _apply_previous_day_fields_from_daily_rows
+
+        quote = {"timestamp": "2026-05-08T13:35:00+00:00"}
+        _apply_previous_day_fields_from_daily_rows(
+            quote,
+            [
+                {"session_date": "2026-05-06", "close": 100.0, "volume": 1_000_000},
+                {"session_date": "2026-05-07", "close": 110.0, "volume": 2_000_000},
+                {"session_date": "2026-05-08", "close": 115.0, "volume": 500_000},
+            ],
+        )
+
+        self.assertEqual(quote["previous_day_date"], "2026-05-07")
+        self.assertEqual(quote["previous_day_close"], 110.0)
+        self.assertEqual(quote["previous_day_pct_change"], 10.0)
+        self.assertEqual(quote["previous_day_volume"], 2_000_000)
+        self.assertEqual(quote["previous_day_trading_value"], 220_000_000.0)
+
     def test_report_includes_current_strength_against_previous_regular_close(self) -> None:
         from src.sector_strength import build_sector_strength_report
 
@@ -236,6 +278,28 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertIn("VIX", focus_text)
         self.assertNotIn("QQQ", focus_text)
 
+    def test_sector_strength_report_uses_nasdaq_futures_when_ixic_is_stale(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "NQ=F": {"symbol": "NQ=F", "price": 29755.5, "previous_close": 29558.75, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+            "^IXIC": {"symbol": "^IXIC", "price": 26343.97, "previous_close": 26343.97, "is_stale_regular_close": True, "source": "unit", "timestamp": "2026-05-22T21:16:00+00:00"},
+            "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+            "SOXX": {"price": 220.0, "previous_close": 219.0, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+            "BTC-USD": {"price": 65000.0, "previous_close": 65000.0, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+            "CL=F": {"price": 80.0, "previous_close": 81.0, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+            "^VIX": {"price": 18.0, "previous_close": 18.5, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 27.0, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+            "LUNR": {"price": 12.6, "previous_close": 12.0, "source": "unit", "timestamp": "2026-05-26T07:37:04+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-05-26T07:37:04+00:00")
+        focus_text = "\n".join(report["focus_lines"])
+
+        self.assertIn("NASDAQ +0.67%", focus_text)
+        self.assertEqual(report["benchmarks"]["NASDAQ"], 0.67)
+        self.assertNotIn("NQ=F", focus_text)
+
     def test_user_watchlist_theme_baskets_rank_space_and_show_internal_leaders(self) -> None:
         from src.sector_strength import build_sector_strength_report
 
@@ -257,6 +321,101 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertGreater(report["strong_themes"][0]["breadth_positive_pct"], 70.0)
         self.assertEqual(report["strong_themes"][0]["leaders"][0]["symbol"], "RKLB")
         self.assertTrue(any("강한 테마" in line and "우주/항공우주" in line and "RKLB" in line for line in report["focus_lines"]))
+
+    def test_theme_leaders_use_trading_value_and_growth_not_pct_only(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit"},
+            "NVDA": {
+                "price": 106.0,
+                "previous_close": 100.0,
+                "volume": 1_000_000,
+                "previous_volume": 2_000_000,
+                "trading_value": 106_000_000,
+                "previous_day_trading_value": 200_000_000,
+                "rsi14": 86.0,
+                "source": "unit",
+            },
+            "MU": {
+                "price": 104.0,
+                "previous_close": 100.0,
+                "volume": 20_000_000,
+                "previous_volume": 5_000_000,
+                "trading_value": 2_080_000_000,
+                "previous_day_trading_value": 500_000_000,
+                "rsi14": 70.0,
+                "source": "unit",
+            },
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-04-30T13:35:00+00:00")
+        semis = next(row for row in report["theme_baskets"] if row["key"] == "semiconductors")
+
+        self.assertEqual(semis["leaders"][0]["symbol"], "MU")
+        self.assertGreater(semis["leaders"][0]["leader_score"], semis["leaders"][1]["leader_score"])
+        self.assertIn("trading_value_vs_previous_rank", semis["leaders"][0]["leader_score_basis"])
+
+    def test_theme_leaders_include_anchor_symbol_score(self) -> None:
+        from src.sector_strength import _rank_theme_leaders
+
+        rows = [
+            {
+                "symbol": "SNDK",
+                "pct_change": 5.0,
+                "trading_value": 100_000_000,
+                "trading_value_vs_previous_pct": 10.0,
+                "volume_vs_previous_pct": 10.0,
+            },
+            {
+                "symbol": "NVDA",
+                "pct_change": 5.0,
+                "trading_value": 100_000_000,
+                "trading_value_vs_previous_pct": 10.0,
+                "volume_vs_previous_pct": 10.0,
+            },
+            {
+                "symbol": "STX",
+                "pct_change": 5.0,
+                "trading_value": 100_000_000,
+                "trading_value_vs_previous_pct": 10.0,
+                "volume_vs_previous_pct": 10.0,
+            },
+        ]
+
+        leaders = _rank_theme_leaders(rows, limit=3, anchor_symbols=("NVDA",))
+
+        self.assertEqual(leaders[0]["symbol"], "NVDA")
+        self.assertEqual(leaders[0]["leader_score_basis"]["theme_leader_rank"], 100.0)
+        self.assertGreater(leaders[0]["leader_score"], leaders[1]["leader_score"])
+
+    def test_theme_sections_use_positive_and_negative_thresholds_instead_of_forced_top_bottom(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 27.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "LUNR": {"price": 12.6, "previous_close": 12.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "COIN": {"price": 95.0, "previous_close": 100.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "MARA": {"price": 9.8, "previous_close": 10.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "NVDA": {"price": 100.0, "previous_close": 100.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "AMD": {"price": 100.0, "previous_close": 100.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-04-30T13:35:00+00:00")
+        strong_keys = {row["key"] for row in report["strong_themes"]}
+        weak_keys = {row["key"] for row in report["weak_themes"]}
+        focus_text = "\n".join(report["focus_lines"])
+
+        self.assertIn("space_aerospace", strong_keys)
+        self.assertNotIn("crypto_equities", strong_keys)
+        self.assertNotIn("semiconductors", strong_keys)
+        self.assertIn("crypto_equities", weak_keys)
+        self.assertNotIn("space_aerospace", weak_keys)
+        self.assertNotIn("semiconductors", weak_keys)
+        self.assertIn("강한 테마: 우주/항공우주", focus_text)
+        self.assertIn("약한 테마: 암호화/코인 관련주", focus_text)
+        self.assertNotIn("반도체 평균 +0.00%", focus_text)
 
     def test_theme_lines_use_clear_rising_ratio_label_instead_of_bullish_candle(self) -> None:
         from src.sector_strength import build_sector_strength_report
@@ -321,7 +480,7 @@ class SectorStrengthTest(unittest.TestCase):
         expected_fragments = (
             "RSI 64(+5): 50선 위에서 재가속",
             "MACD 0.72/0.41 h+0.31(+0.09): 신호선 위·히스토그램 확대",
-            "스토캐스틱 Slow 88/82(+4): 과열권 K>D 유지",
+            "Stochastic Slow 88/82(+4): 과열권 K>D 유지",
             "BB 92%(+8) 상단권: 상단 확장",
             "종합: 모멘텀 개선 중",
         )
@@ -330,6 +489,7 @@ class SectorStrengthTest(unittest.TestCase):
         for fragment in expected_fragments:
             self.assertIn(fragment, focus_text)
         self.assertNotIn("Stoch ", focus_text)
+        self.assertNotIn("스토캐스틱", focus_text)
         self.assertNotIn("구름", focus_text)
         self.assertNotIn("전환선", focus_text)
 
@@ -339,15 +499,41 @@ class SectorStrengthTest(unittest.TestCase):
         quotes = {
             "SPY": {"price": 500.0, "previous_close": 500.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
             "QQQ": {"price": 430.0, "previous_close": 430.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
-            "RKLB": {"price": 30.0, "previous_close": 27.0, "volume": 1_000_000, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
-            "LUNR": {"price": 12.6, "previous_close": 12.0, "volume": 500_000, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 27.0, "volume": 1_000_000, "day_volume": 1_000_000, "previous_volume": 2_000_000, "volume_vs_previous_pct": -50.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
+            "LUNR": {"price": 12.6, "previous_close": 12.0, "volume": 500_000, "day_volume": 500_000, "previous_volume": 1_000_000, "volume_vs_previous_pct": -50.0, "source": "unit", "timestamp": "2026-04-30T13:35:00+00:00"},
         }
 
         report = build_sector_strength_report(quotes, collected_at="2026-04-30T13:35:00+00:00")
         space = next(row for row in report["theme_baskets"] if row["key"] == "space_aerospace")
 
         self.assertEqual(space["trading_value"], 36300000.0)
-        self.assertTrue(any("강한 테마" in line and "거래대금" in line for line in report["focus_lines"]))
+        self.assertEqual(space["day_volume"], 1_500_000)
+        self.assertEqual(space["previous_volume"], 3_000_000)
+        self.assertEqual(space["volume_vs_previous_pct"], -50.0)
+        focus_text = "\n".join(report["focus_lines"])
+        self.assertIn("거래대금", focus_text)
+        self.assertIn("거래량 1.5M/3.0M(-50.00%)", focus_text)
+
+    def test_report_summarizes_previous_day_strong_theme_leaders(self) -> None:
+        from src.sector_strength import build_sector_strength_report
+
+        quotes = {
+            "SPY": {"price": 500.0, "previous_close": 500.0, "previous_day_pct_change": 0.5, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "QQQ": {"price": 430.0, "previous_close": 430.0, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "RKLB": {"price": 30.0, "previous_close": 30.0, "previous_day_pct_change": 12.0, "previous_day_close": 30.0, "previous_day_volume": 1_000_000, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "LUNR": {"price": 12.0, "previous_close": 12.0, "previous_day_pct_change": 7.0, "previous_day_close": 12.0, "previous_day_volume": 2_000_000, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "RDW": {"price": 6.0, "previous_close": 6.0, "previous_day_pct_change": 4.0, "previous_day_close": 6.0, "previous_day_volume": 3_000_000, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+            "COIN": {"price": 200.0, "previous_close": 200.0, "previous_day_pct_change": -2.0, "previous_day_close": 200.0, "previous_day_volume": 500_000, "source": "unit", "timestamp": "2026-05-08T13:35:00+00:00"},
+        }
+
+        report = build_sector_strength_report(quotes, collected_at="2026-05-08T13:35:00+00:00")
+        focus_text = "\n".join(report["focus_lines"])
+
+        self.assertEqual(report["previous_day_strong_themes"][0]["key"], "space_aerospace")
+        self.assertEqual(report["previous_day_strong_themes"][0]["previous_day_breadth_positive_pct"], 100.0)
+        self.assertIn("전날 강했던 테마: 우주/항공우주 전일 상승비율 100.0%", focus_text)
+        self.assertIn("전일 거래대금 $72.0M", focus_text)
+        self.assertIn("전일 주도 RKLB +12.00% / 전일종가 30 / 전일 거래량 1.0M", focus_text)
 
     def test_photo_theme_baskets_drive_primary_summary_not_broad_etfs(self) -> None:
         from src.sector_strength import build_sector_strength_report
@@ -381,8 +567,10 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertEqual(USER_SUB_THEME_BASKETS["semis_memory_storage"]["parent"], "semiconductors")
         self.assertIn("MU", USER_SUB_THEME_BASKETS["semis_memory_storage"]["symbols"])
         self.assertIn("NVDA", USER_SUB_THEME_BASKETS["semis_ai_accelerators"]["symbols"])
+        self.assertIn("NVDA", USER_SUB_THEME_BASKETS["semis_ai_accelerators"]["anchor_symbols"])
         self.assertIn("AMAT", USER_SUB_THEME_BASKETS["semis_equipment"]["symbols"])
         self.assertIn("VST", USER_SUB_THEME_BASKETS["power_utilities_generation"]["symbols"])
+        self.assertIn("VST", USER_SUB_THEME_BASKETS["power_utilities_generation"]["anchor_symbols"])
         self.assertIn("OKLO", USER_SUB_THEME_BASKETS["nuclear_smr"]["symbols"])
 
     def test_sub_theme_strength_detects_semiconductor_memory_rotation(self) -> None:
@@ -436,7 +624,7 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertTrue(
             any(
                 "로테이션 해석" in line
-                and "반도체/AI칩 내부" in line
+                and "반도체 내부" in line
                 and "메모리/스토리지로 자금 이동" in line
                 and "AI 가속기/GPU 약세" in line
                 and "MU" in line
@@ -454,22 +642,33 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertIn("nuclear_power_uranium", USER_THEME_BASKETS)
         self.assertIn("quantum", USER_THEME_BASKETS)
         self.assertIn("NVDA", USER_THEME_BASKETS["semiconductors"]["symbols"])
+        self.assertIn("NVDA", USER_THEME_BASKETS["semiconductors"]["anchor_symbols"])
         self.assertIn("SOXL", USER_THEME_BASKETS["semiconductors"]["excluded_from_score"])
         self.assertIn("OKLO", USER_THEME_BASKETS["nuclear_power_uranium"]["symbols"])
+        self.assertIn("OKLO", USER_THEME_BASKETS["nuclear_power_uranium"]["anchor_symbols"])
         self.assertIn("IONQ", USER_THEME_BASKETS["quantum"]["symbols"])
+        self.assertIn("IONQ", USER_THEME_BASKETS["quantum"]["anchor_symbols"])
         self.assertIn("PLTR", USER_THEME_BASKETS["ai_bigtech_infra"]["symbols"])
+        self.assertIn("PLTR", USER_THEME_BASKETS["ai_bigtech_infra"]["anchor_symbols"])
         self.assertIn("BMNU", USER_THEME_BASKETS["crypto_equities"]["symbols"])
         self.assertIn("BMNU", USER_THEME_BASKETS["crypto_equities"]["excluded_from_score"])
 
     def test_fetch_sector_strength_quotes_uses_yahoo_chart_quote_first_for_intraday_alerts(self) -> None:
         from src.sector_strength import fetch_sector_strength_quotes
 
-        def fake_chart_pack(symbol: str) -> dict:
+        def fake_chart_pack(symbol: str, range_: str = "2d", interval: str = "1m") -> dict:
+            if interval == "1d":
+                return {
+                    "available": True,
+                    "source": "chart-daily-test",
+                    "collected_at": "2026-04-30T12:22:38+00:00",
+                    "quote": {"timestamp": "2026-04-29T20:00:00+00:00", "rsi14": 55.5},
+                }
             return {
                 "available": True,
                 "source": "chart-quote-test",
                 "collected_at": "2026-04-30T12:22:37+00:00",
-                "quote": {"price": 66.1, "previous_close": 64.98, "pct_change": 1.72},
+                "quote": {"price": 66.1, "previous_close": 64.98, "pct_change": 1.72, "rsi14": 10.0},
             }
 
         with patch("src.yfinance_data.fetch_yfinance_market_pack", side_effect=AssertionError("must not use full market pack")), patch(
@@ -479,14 +678,16 @@ class SectorStrengthTest(unittest.TestCase):
         ) as chart_pack, patch("src.yfinance_data.fetch_yfinance_quote_pack", side_effect=AssertionError("must not use fallback when chart quote is available")):
             quotes = fetch_sector_strength_quotes(["OKLO", "SMR"])
 
-        self.assertEqual(chart_pack.call_count, 2)
+        self.assertEqual(chart_pack.call_count, 4)
         self.assertEqual(quotes["OKLO"]["source"], "chart-quote-test")
         self.assertEqual(quotes["OKLO"]["pct_change"], 1.72)
+        self.assertEqual(quotes["OKLO"]["rsi14"], 55.5)
+        self.assertEqual(quotes["OKLO"]["technical_interval"], "1d")
 
     def test_fetch_sector_strength_quotes_falls_back_to_yfinance_quote_only_helper(self) -> None:
         from src.sector_strength import fetch_sector_strength_quotes
 
-        def fake_chart_pack(symbol: str) -> dict:
+        def fake_chart_pack(symbol: str, range_: str = "2d", interval: str = "1m") -> dict:
             return {"available": False, "source": "yahoo_chart_quote_error", "warning": "chart unavailable"}
 
         def fake_quote_pack(symbol: str) -> dict:
@@ -511,7 +712,17 @@ class SectorStrengthTest(unittest.TestCase):
     def test_fetch_sector_strength_quotes_prefers_toss_display_price_but_keeps_yahoo_technicals(self) -> None:
         from src.sector_strength import fetch_sector_strength_quotes
 
-        def fake_chart_pack(symbol: str) -> dict:
+        def fake_chart_pack(symbol: str, range_: str = "2d", interval: str = "1m") -> dict:
+            if interval == "1d":
+                return {
+                    "available": True,
+                    "source": "yahoo_chart_quote",
+                    "collected_at": "2026-04-30T20:05:30+00:00",
+                    "quote": {
+                        "timestamp": "2026-04-29T20:00:00+00:00",
+                        "rsi14": 61.2,
+                    },
+                }
             return {
                 "available": True,
                 "source": "yahoo_chart_quote",
@@ -522,7 +733,7 @@ class SectorStrengthTest(unittest.TestCase):
                     "pct_change": 0.0,
                     "session_label": "애프터장",
                     "is_stale_regular_close": True,
-                    "rsi14": 61.2,
+                    "rsi14": 10.0,
                 },
             }
 
@@ -555,6 +766,7 @@ class SectorStrengthTest(unittest.TestCase):
         self.assertEqual(quotes["RKLB"]["pct_change_basis"], "Toss base 대비")
         self.assertFalse(quotes["RKLB"]["is_stale_regular_close"])
         self.assertEqual(quotes["RKLB"]["rsi14"], 61.2)
+        self.assertEqual(quotes["RKLB"]["technical_interval"], "1d")
 
 
 
@@ -573,9 +785,11 @@ class SectorStrengthTest(unittest.TestCase):
 
         self.assertTrue(report["flow_proxies"]["active"])
         self.assertIn("기관성 유입 의심", report["flow_proxies"]["summary"])
-        self.assertIn("반도체/AI칩", report["flow_proxies"]["summary"])
+        self.assertIn("반도체", report["flow_proxies"]["summary"])
+        self.assertNotIn("거래대금/VWAP 기반 proxy", report["flow_proxies"]["summary"])
         self.assertTrue(any(line.startswith("수급 proxy:") and "VWAP 위" in line for line in report["focus_lines"]))
         self.assertTrue(any("기관성 유입 의심" in action and "단정 금지" in action for action in report["next_actions"]))
+        self.assertFalse(any("거래대금/VWAP/상대강도 기반 proxy" in action for action in report["next_actions"]))
 
 if __name__ == "__main__":
     unittest.main()

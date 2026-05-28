@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import math
 import os
-from typing import Any
+from typing import Any, Iterable
 
 try:
     from zoneinfo import ZoneInfo
@@ -115,6 +115,23 @@ def _quote_session_label(quote: dict[str, Any]) -> str:
     return label or _expected_session_label()
 
 
+def _et_session_date_key(value: Any) -> str | None:
+    if value in (None, ""):
+        return None
+    if isinstance(value, (int, float)):
+        dt = datetime.fromtimestamp(float(value), timezone.utc)
+    else:
+        try:
+            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except Exception:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+    if ZoneInfo is not None:
+        dt = dt.astimezone(ZoneInfo("America/New_York"))
+    return dt.date().isoformat()
+
+
 def _display_meta_fields(quote: dict[str, Any]) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "session_label": _quote_session_label(quote),
@@ -133,8 +150,11 @@ def _row_price_session_text(row: dict[str, Any]) -> str:
     basis = str(row.get("pct_change_basis") or "").strip()
     stale = str(row.get("stale_note") or "").strip() if row.get("is_stale_regular_close") else ""
     parts: list[str] = []
+    volume_text = _volume_inline_text(row)
     if price is not None:
-        parts.append(f"가격 {_fmt_price(price)}")
+        parts.append(f"가격 {_fmt_price(price)}{volume_text}")
+    elif volume_text:
+        parts.append(volume_text.removeprefix(" / "))
     if session:
         parts.append(session)
     if basis:
@@ -200,6 +220,11 @@ _TECHNICAL_FIELD_NAMES = (
 
 def _technical_fields(quote: dict[str, Any]) -> dict[str, Any]:
     return {field: quote.get(field) for field in _TECHNICAL_FIELD_NAMES if quote.get(field) is not None}
+
+
+def _clear_technical_fields(quote: dict[str, Any]) -> None:
+    for field in _TECHNICAL_FIELD_NAMES:
+        quote.pop(field, None)
 
 
 def _fmt_indicator_value(value: Any, digits: int = 2) -> str:
@@ -395,11 +420,11 @@ def _technical_suffix(row: dict[str, Any]) -> str:
     stoch_state = str(row.get("stochastic_state") or "")
     if stoch_k is not None and stoch_d is not None:
         parts.append(
-            f"스토캐스틱 Slow {stoch_k:.0f}/{stoch_d:.0f}{_fmt_delta_paren(stoch_k_delta, 0)}: "
+            f"Stochastic Slow {stoch_k:.0f}/{stoch_d:.0f}{_fmt_delta_paren(stoch_k_delta, 0)}: "
             f"{_stochastic_interpretation(stoch_k, stoch_d, stoch_k_delta, stoch_state or None)}"
         )
     elif stoch_state:
-        parts.append(f"스토캐스틱 Slow {stoch_state}: {_stochastic_interpretation(stoch_k, stoch_d, stoch_k_delta, stoch_state)}")
+        parts.append(f"Stochastic Slow {stoch_state}: {_stochastic_interpretation(stoch_k, stoch_d, stoch_k_delta, stoch_state)}")
 
     bb_state = str(row.get("bollinger_state") or "")
     bb_position = _to_float(row.get("bollinger_position_pct"))
@@ -427,8 +452,98 @@ def _fmt_trading_value(value: Any) -> str:
     return f"${numeric:.0f}"
 
 
+def _fmt_volume(value: Any) -> str:
+    numeric = _to_float(value)
+    if numeric is None:
+        return "n/a"
+    if abs(numeric) >= 1_000_000_000:
+        return f"{numeric / 1_000_000_000:.1f}B"
+    if abs(numeric) >= 1_000_000:
+        return f"{numeric / 1_000_000:.1f}M"
+    if abs(numeric) >= 1_000:
+        return f"{numeric / 1_000:.1f}K"
+    return f"{numeric:.0f}"
+
+
+def _first_numeric(*values: Any) -> float | None:
+    for value in values:
+        numeric = _to_float(value)
+        if numeric is not None:
+            return numeric
+    return None
+
+
+def _first_positive_numeric(*values: Any) -> float | None:
+    for value in values:
+        numeric = _to_float(value)
+        if numeric is not None and numeric > 0:
+            return numeric
+    return None
+
+
+def _quote_day_volume(quote: dict[str, Any]) -> float | None:
+    positive = _first_positive_numeric(quote.get("day_volume"), quote.get("volume"), quote.get("regularMarketVolume"))
+    if positive is not None:
+        return positive
+    return _first_numeric(quote.get("day_volume"), quote.get("volume"), quote.get("regularMarketVolume"))
+
+
+def _quote_previous_volume(quote: dict[str, Any]) -> float | None:
+    return _first_numeric(quote.get("previous_volume"), quote.get("previousRegularMarketVolume"))
+
+
+def _quote_volume_vs_previous_pct(quote: dict[str, Any]) -> float | None:
+    direct = _first_numeric(quote.get("volume_vs_previous_pct"), quote.get("volumeVsPreviousPct"))
+    if direct is not None:
+        return round(direct, 1)
+    day_volume = _quote_day_volume(quote)
+    previous_volume = _quote_previous_volume(quote)
+    if day_volume is None or previous_volume in (None, 0):
+        return None
+    return round(((day_volume - float(previous_volume)) / float(previous_volume)) * 100, 1)
+
+
+def _quote_volume_fields(quote: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "day_volume": _quote_day_volume(quote),
+        "previous_volume": _quote_previous_volume(quote),
+        "volume_vs_previous_pct": _quote_volume_vs_previous_pct(quote),
+    }
+
+
+def _aggregate_volume_fields(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    day_values = [_quote_day_volume(row) for row in rows]
+    day_values = [value for value in day_values if value is not None]
+    previous_values = [_to_float(row.get("previous_volume")) for row in rows]
+    previous_values = [value for value in previous_values if value is not None]
+    day_total = sum(day_values) if day_values else None
+    previous_total = sum(previous_values) if previous_values else None
+    volume_vs_previous_pct = None
+    if day_total is not None and previous_total not in (None, 0):
+        volume_vs_previous_pct = round(((day_total - float(previous_total)) / float(previous_total)) * 100, 1)
+    return {
+        "day_volume": round(day_total) if day_total is not None else None,
+        "previous_volume": round(previous_total) if previous_total is not None else None,
+        "volume_vs_previous_pct": volume_vs_previous_pct,
+    }
+
+
+def _volume_inline_text(row: dict[str, Any]) -> str:
+    day_volume = _quote_day_volume(row)
+    previous_volume = _to_float(row.get("previous_volume"))
+    if day_volume is None and previous_volume is None:
+        return ""
+    volume_vs_previous_pct = _quote_volume_vs_previous_pct(row)
+    if day_volume is not None and previous_volume is not None:
+        pct_text = f"({_fmt_pct(volume_vs_previous_pct)})" if volume_vs_previous_pct is not None else ""
+        return f" / 거래량 {_fmt_volume(day_volume)}/{_fmt_volume(previous_volume)}{pct_text}"
+    if day_volume is not None:
+        return f" / 거래량 {_fmt_volume(day_volume)}"
+    return f" / 거래량 n/a/{_fmt_volume(previous_volume)}"
+
+
 def _quote_volume(quote: dict[str, Any]) -> float | None:
-    return _to_float(quote.get("volume") or quote.get("regularMarketVolume") or quote.get("day_volume"))
+    return _quote_day_volume(quote)
 
 
 def _quote_trading_value(quote: dict[str, Any]) -> float | None:
@@ -440,6 +555,47 @@ def _quote_trading_value(quote: dict[str, Any]) -> float | None:
     if volume is None or price is None:
         return None
     return volume * price
+
+
+def _quote_previous_day_pct(quote: dict[str, Any]) -> float | None:
+    return _first_numeric(quote.get("previous_day_pct_change"), quote.get("previous_session_pct_change"))
+
+
+def _quote_previous_day_volume(quote: dict[str, Any]) -> float | None:
+    return _first_numeric(quote.get("previous_day_volume"), quote.get("previous_session_volume"))
+
+
+def _quote_previous_day_trading_value(quote: dict[str, Any]) -> float | None:
+    direct = _first_numeric(quote.get("previous_day_trading_value"), quote.get("previous_session_trading_value"))
+    if direct is not None:
+        return direct
+    close = _first_numeric(quote.get("previous_day_close"), quote.get("previous_session_close"))
+    volume = _quote_previous_day_volume(quote)
+    if close is None or volume is None:
+        return None
+    return close * volume
+
+
+def _quote_trading_value_vs_previous_pct(quote: dict[str, Any]) -> float | None:
+    direct = _first_numeric(quote.get("trading_value_vs_previous_pct"), quote.get("turnover_vs_previous_pct"))
+    if direct is not None:
+        return round(direct, 1)
+    current = _quote_trading_value(quote)
+    previous = _quote_previous_day_trading_value(quote)
+    if current is None or previous in (None, 0):
+        return None
+    return round(((current - float(previous)) / float(previous)) * 100, 1)
+
+
+def _previous_day_volume_inline_text(row: dict[str, Any]) -> str:
+    volume = _quote_previous_day_volume(row)
+    return f" / 전일 거래량 {_fmt_volume(volume)}" if volume is not None else ""
+
+
+def _aggregate_previous_day_volume_fields(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    values = [_quote_previous_day_volume(row) for row in rows]
+    values = [value for value in values if value is not None]
+    return {"previous_day_volume": round(sum(values)) if values else None}
 
 
 def _quote_vwap(quote: dict[str, Any]) -> float | None:
@@ -585,6 +741,107 @@ def _median(values: list[float]) -> float | None:
     return (ordered[midpoint - 1] + ordered[midpoint]) / 2
 
 
+def _rank_metric_scores(rows: list[dict[str, Any]], field: str) -> dict[str, float]:
+    values: list[tuple[str, float]] = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip()
+        value = _to_float(row.get(field))
+        if symbol and value is not None:
+            values.append((symbol, value))
+    if not values:
+        return {}
+    values.sort(key=lambda item: item[1], reverse=True)
+    if len(values) == 1:
+        return {values[0][0]: 100.0}
+    if values[0][1] == values[-1][1]:
+        return {symbol: 100.0 for symbol, _value in values}
+    denominator = len(values) - 1
+    scores: dict[str, float] = {}
+    index = 0
+    while index < len(values):
+        value = values[index][1]
+        end = index + 1
+        while end < len(values) and values[end][1] == value:
+            end += 1
+        rank_scores = [100.0 * (denominator - rank) / denominator for rank in range(index, end)]
+        tied_score = sum(rank_scores) / len(rank_scores)
+        for symbol, _value in values[index:end]:
+            scores[symbol] = round(tied_score, 3)
+        index = end
+    return scores
+
+
+def _anchor_symbol_scores(rows: list[dict[str, Any]], anchor_symbols: Iterable[str] | None = None) -> dict[str, float]:
+    if not anchor_symbols:
+        return {}
+    present_symbols = {str(row.get("symbol") or "").upper().strip() for row in rows}
+    ordered = [
+        str(symbol).upper().strip()
+        for symbol in anchor_symbols
+        if str(symbol).strip() and str(symbol).upper().strip() in present_symbols
+    ]
+    ordered = list(dict.fromkeys(ordered))
+    if not ordered:
+        return {}
+    if len(ordered) == 1:
+        return {ordered[0]: 100.0}
+    denominator = len(ordered) - 1
+    return {symbol: round(100.0 * (denominator - rank) / denominator, 3) for rank, symbol in enumerate(ordered)}
+
+
+THEME_LEADER_CANDIDATE_LIMIT = 8
+
+
+def _rank_theme_leaders(rows: list[dict[str, Any]], limit: int = 3, anchor_symbols: Iterable[str] | None = None) -> list[dict[str, Any]]:
+    """테마 안 주도주를 등락률 단독이 아니라 돈/거래 증가까지 섞어 고른다.
+
+    SPY 상대강도와 RSI는 의도적으로 점수에 넣지 않는다.
+    """
+    if not rows:
+        return []
+    pct_scores = _rank_metric_scores(rows, "pct_change")
+    value_scores = _rank_metric_scores(rows, "trading_value")
+    value_growth_scores = _rank_metric_scores(rows, "trading_value_vs_previous_pct")
+    volume_growth_scores = _rank_metric_scores(rows, "volume_vs_previous_pct")
+    theme_leader_scores = _anchor_symbol_scores(rows, anchor_symbols)
+    scored: list[dict[str, Any]] = []
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip()
+        if not symbol:
+            continue
+        pct_score = pct_scores.get(symbol, 0.0)
+        value_score = value_scores.get(symbol, 0.0)
+        value_growth_score = value_growth_scores.get(symbol, 0.0)
+        volume_growth_score = volume_growth_scores.get(symbol, 0.0)
+        theme_leader_score = theme_leader_scores.get(symbol.upper(), 0.0)
+        leader_score = (
+            pct_score * 0.35
+            + value_score * 0.25
+            + value_growth_score * 0.25
+            + volume_growth_score * 0.05
+            + theme_leader_score * 0.10
+        )
+        enriched = dict(row)
+        enriched["leader_score"] = round(leader_score, 3)
+        enriched["leader_score_basis"] = {
+            "pct_change_rank": round(pct_score, 1),
+            "trading_value_rank": round(value_score, 1),
+            "trading_value_vs_previous_rank": round(value_growth_score, 1),
+            "volume_vs_previous_rank": round(volume_growth_score, 1),
+            "theme_leader_rank": round(theme_leader_score, 1),
+        }
+        scored.append(enriched)
+    return sorted(
+        scored,
+        key=lambda row: (
+            _to_float(row.get("leader_score")) or 0.0,
+            _to_float(row.get("pct_change")) or -999.0,
+            _to_float(row.get("trading_value")) or 0.0,
+        ),
+        reverse=True,
+    )[:limit]
+
+
 def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -> list[dict[str, Any]]:
     baskets: list[dict[str, Any]] = []
     for key, basket in USER_THEME_BASKETS.items():
@@ -605,7 +862,10 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -> li
                 "relative_to_spy_pct": round(pct - spy_pct, 2),
                 "price": quote.get("price"),
                 "volume": _quote_volume(quote),
+                **_quote_volume_fields(quote),
                 "trading_value": _quote_trading_value(quote),
+                "previous_day_trading_value": _quote_previous_day_trading_value(quote),
+                "trading_value_vs_previous_pct": _quote_trading_value_vs_previous_pct(quote),
                 "pct_change_5m": _intraday_pct_change(quote, 5),
                 "vwap": _quote_vwap(quote),
                 "vwap_position_pct": _quote_vwap_position_pct(quote),
@@ -623,13 +883,15 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -> li
         pct_values = [float(row["pct_change"]) for row in score_rows]
         trading_values = [_to_float(row.get("trading_value")) for row in score_rows]
         trading_values = [value for value in trading_values if value is not None]
+        volume_fields = _aggregate_volume_fields(score_rows)
         avg_pct = sum(pct_values) / len(pct_values)
         median_pct = _median(pct_values)
         breadth_positive_pct = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100
         avg_relative_to_spy = avg_pct - spy_pct
         breadth_bonus = (breadth_positive_pct - 50.0) / 25.0
         strength_score = avg_pct + avg_relative_to_spy + breadth_bonus
-        leaders = sorted(score_rows, key=lambda row: row["pct_change"], reverse=True)[:3]
+        leader_candidates = _rank_theme_leaders(score_rows, limit=THEME_LEADER_CANDIDATE_LIMIT, anchor_symbols=basket.get("anchor_symbols", ()))
+        leaders = leader_candidates[:3]
         laggards = sorted(score_rows, key=lambda row: row["pct_change"])[:3]
         baskets.append(
             {
@@ -645,6 +907,84 @@ def _rank_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -> li
                 "breadth_positive_pct": round(breadth_positive_pct, 1),
                 "relative_to_spy_pct": round(avg_relative_to_spy, 2),
                 "trading_value": round(sum(trading_values), 2) if trading_values else None,
+                **volume_fields,
+                "strength_score": round(strength_score, 3),
+                "leader_candidates": leader_candidates,
+                "leaders": leaders,
+                "laggards": laggards,
+            }
+        )
+    return sorted(baskets, key=lambda row: row["strength_score"], reverse=True)
+
+
+def _rank_previous_day_theme_baskets(quotes: dict[str, dict[str, Any]], spy_previous_day_pct: float | None) -> list[dict[str, Any]]:
+    baskets: list[dict[str, Any]] = []
+    benchmark_pct = spy_previous_day_pct or 0.0
+    for key, basket in USER_THEME_BASKETS.items():
+        symbols = tuple(str(symbol).upper() for symbol in basket.get("symbols", ()))
+        excluded = {str(symbol).upper() for symbol in basket.get("excluded_from_score", ())}
+        constituents: list[dict[str, Any]] = []
+        score_rows: list[dict[str, Any]] = []
+        for symbol in symbols:
+            quote = quotes.get(symbol)
+            if not quote:
+                continue
+            pct = _quote_previous_day_pct(quote)
+            if pct is None:
+                continue
+            row = {
+                "symbol": symbol,
+                "previous_day_pct_change": round(pct, 2),
+                "pct_change": round(pct, 2),
+                "relative_to_spy_pct": round(pct - benchmark_pct, 2),
+                "previous_day_close": quote.get("previous_day_close"),
+                "previous_day_volume": _quote_previous_day_volume(quote),
+                "previous_day_trading_value": _quote_previous_day_trading_value(quote),
+                "previous_day_date": quote.get("previous_day_date"),
+                "source": quote.get("source"),
+                "timestamp": quote.get("timestamp") or quote.get("collected_at"),
+                "score_eligible": symbol not in excluded,
+            }
+            constituents.append(row)
+            if row["score_eligible"]:
+                score_rows.append(row)
+        if not score_rows:
+            continue
+        pct_values = [float(row["previous_day_pct_change"]) for row in score_rows]
+        trading_values = [_to_float(row.get("previous_day_trading_value")) for row in score_rows]
+        trading_values = [value for value in trading_values if value is not None]
+        volume_fields = _aggregate_previous_day_volume_fields(score_rows)
+        avg_pct = sum(pct_values) / len(pct_values)
+        median_pct = _median(pct_values)
+        breadth_positive_pct = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100
+        avg_relative_to_spy = avg_pct - benchmark_pct
+        breadth_bonus = (breadth_positive_pct - 50.0) / 25.0
+        strength_score = avg_pct + avg_relative_to_spy + breadth_bonus
+        leaders = sorted(score_rows, key=lambda row: row["previous_day_pct_change"], reverse=True)[:3]
+        laggards = sorted(score_rows, key=lambda row: row["previous_day_pct_change"])[:3]
+        session_dates = sorted(
+            {
+                str(row.get("previous_day_date"))
+                for row in score_rows
+                if row.get("previous_day_date") not in (None, "")
+            }
+        )
+        baskets.append(
+            {
+                "key": key,
+                "name": str(basket.get("name") or key),
+                "symbols": list(symbols),
+                "covered_symbols": [row["symbol"] for row in constituents],
+                "excluded_symbols": sorted(symbol for symbol in excluded if symbol in {row["symbol"] for row in constituents}),
+                "constituents": sorted(constituents, key=lambda row: row["previous_day_pct_change"], reverse=True),
+                "score_symbols": [row["symbol"] for row in score_rows],
+                "previous_day_average_pct_change": round(avg_pct, 2),
+                "previous_day_median_pct_change": round(float(median_pct), 2) if median_pct is not None else None,
+                "previous_day_breadth_positive_pct": round(breadth_positive_pct, 1),
+                "previous_day_relative_to_spy_pct": round(avg_relative_to_spy, 2),
+                "previous_day_trading_value": round(sum(trading_values), 2) if trading_values else None,
+                "previous_day_date": session_dates[-1] if session_dates else None,
+                **volume_fields,
                 "strength_score": round(strength_score, 3),
                 "leaders": leaders,
                 "laggards": laggards,
@@ -676,7 +1016,10 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -
                 "relative_to_spy_pct": round(pct - spy_pct, 2),
                 "price": quote.get("price"),
                 "volume": _quote_volume(quote),
+                **_quote_volume_fields(quote),
                 "trading_value": _quote_trading_value(quote),
+                "previous_day_trading_value": _quote_previous_day_trading_value(quote),
+                "trading_value_vs_previous_pct": _quote_trading_value_vs_previous_pct(quote),
                 "pct_change_5m": _intraday_pct_change(quote, 5),
                 "vwap": _quote_vwap(quote),
                 "vwap_position_pct": _quote_vwap_position_pct(quote),
@@ -694,13 +1037,15 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -
         pct_values = [float(row["pct_change"]) for row in score_rows]
         trading_values = [_to_float(row.get("trading_value")) for row in score_rows]
         trading_values = [value for value in trading_values if value is not None]
+        volume_fields = _aggregate_volume_fields(score_rows)
         avg_pct = sum(pct_values) / len(pct_values)
         median_pct = _median(pct_values)
         breadth_positive_pct = (sum(1 for value in pct_values if value > 0) / len(pct_values)) * 100
         avg_relative_to_spy = avg_pct - spy_pct
         breadth_bonus = (breadth_positive_pct - 50.0) / 25.0
         strength_score = avg_pct + avg_relative_to_spy + breadth_bonus
-        leaders = sorted(score_rows, key=lambda row: row["pct_change"], reverse=True)[:3]
+        leader_candidates = _rank_theme_leaders(score_rows, limit=THEME_LEADER_CANDIDATE_LIMIT, anchor_symbols=basket.get("anchor_symbols", ()))
+        leaders = leader_candidates[:3]
         laggards = sorted(score_rows, key=lambda row: row["pct_change"])[:3]
         baskets.append(
             {
@@ -718,7 +1063,9 @@ def _rank_sub_theme_baskets(quotes: dict[str, dict[str, Any]], spy_pct: float) -
                 "breadth_positive_pct": round(breadth_positive_pct, 1),
                 "relative_to_spy_pct": round(avg_relative_to_spy, 2),
                 "trading_value": round(sum(trading_values), 2) if trading_values else None,
+                **volume_fields,
                 "strength_score": round(strength_score, 3),
+                "leader_candidates": leader_candidates,
                 "leaders": leaders,
                 "laggards": laggards,
             }
@@ -738,14 +1085,60 @@ def _line_for(prefix: str, rows: list[dict[str, Any]]) -> str:
 
 def _theme_line_for(prefix: str, rows: list[dict[str, Any]]) -> str:
     if not rows:
-        return f"{prefix}: 데이터 부족"
+        return f"{prefix}: 기준 해당 없음"
     parts = []
-    for row in rows[:3]:
-        leaders = ", ".join(f"{leader['symbol']} {_fmt_pct(leader['pct_change'])}" for leader in row.get("leaders", [])[:2])
+    for row in rows:
+        leaders = ", ".join(f"{leader['symbol']} {_fmt_pct(leader['pct_change'])}" for leader in row.get("leaders", [])[:3])
         trading_value = row.get("trading_value")
         value_text = f" / 거래대금 {_fmt_trading_value(trading_value)}" if trading_value is not None else ""
+        volume_text = _volume_inline_text(row)
         parts.append(
-            f"{row['name']} 평균 {_fmt_pct(row['average_pct_change'])} / 상승비율 {row['breadth_positive_pct']:.1f}%{value_text} / 주도 {leaders or 'n/a'}"
+            f"{row['name']} 상승비율 {row['breadth_positive_pct']:.1f}%{value_text}{volume_text} / 주도 {leaders or 'n/a'}"
+        )
+    return f"{prefix}: " + " | ".join(parts)
+
+
+def _positive_theme_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if (_to_float(row.get("average_pct_change")) or 0.0) > 0.0]
+
+
+def _negative_theme_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [row for row in rows if (_to_float(row.get("average_pct_change")) or 0.0) < 0.0]
+
+
+def _positive_previous_day_theme_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        row
+        for row in rows
+        if (_to_float(row.get("previous_day_average_pct_change")) or 0.0) > 0.0
+        and (_to_float(row.get("previous_day_breadth_positive_pct")) or 0.0) >= 50.0
+    ]
+
+
+def _previous_day_leader_text(row: dict[str, Any]) -> str:
+    symbol = str(row.get("symbol") or "").strip()
+    if not symbol:
+        return ""
+    price = _fmt_price(row.get("previous_day_close"))
+    price_text = f" / 전일종가 {price}" if price != "n/a" else ""
+    return f"{symbol} {_fmt_pct(row.get('previous_day_pct_change'))}{price_text}{_previous_day_volume_inline_text(row)}"
+
+
+def _previous_day_theme_line_for(prefix: str, rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return f"{prefix}: 기준 해당 없음"
+    parts = []
+    for row in rows:
+        leaders = ", ".join(
+            text
+            for text in (_previous_day_leader_text(leader) for leader in row.get("leaders", [])[:3])
+            if text
+        )
+        trading_value = row.get("previous_day_trading_value")
+        value_text = f" / 전일 거래대금 {_fmt_trading_value(trading_value)}" if trading_value is not None else ""
+        volume_text = _previous_day_volume_inline_text(row)
+        parts.append(
+            f"{row['name']} 전일 상승비율 {row['previous_day_breadth_positive_pct']:.1f}%{value_text}{volume_text} / 전일 주도 {leaders or 'n/a'}"
         )
     return f"{prefix}: " + " | ".join(parts)
 
@@ -755,11 +1148,12 @@ def _sub_theme_line_for(prefix: str, rows: list[dict[str, Any]]) -> str:
         return f"{prefix}: 데이터 부족"
     parts = []
     for row in rows[:3]:
-        leaders = ", ".join(f"{leader['symbol']} {_fmt_pct(leader['pct_change'])}" for leader in row.get("leaders", [])[:2])
+        leaders = ", ".join(f"{leader['symbol']} {_fmt_pct(leader['pct_change'])}" for leader in row.get("leaders", [])[:3])
         trading_value = row.get("trading_value")
         value_text = f" / 거래대금 {_fmt_trading_value(trading_value)}" if trading_value is not None else ""
+        volume_text = _volume_inline_text(row)
         parts.append(
-            f"{row['parent_name']} > {row['name']} 평균 {_fmt_pct(row['average_pct_change'])} / 상승비율 {row['breadth_positive_pct']:.1f}%{value_text} / 주도 {leaders or 'n/a'}"
+            f"{row['parent_name']} > {row['name']} 평균 {_fmt_pct(row['average_pct_change'])} / 상승비율 {row['breadth_positive_pct']:.1f}%{value_text}{volume_text} / 주도 {leaders or 'n/a'}"
         )
     return f"{prefix}: " + " | ".join(parts)
 
@@ -869,6 +1263,10 @@ def _rank_watchlist_movers(theme_baskets: list[dict[str, Any]], sub_theme_basket
                 "direction": direction,
                 "reason": reason,
                 "price": row.get("price"),
+                "volume": row.get("volume"),
+                "day_volume": row.get("day_volume"),
+                "previous_volume": row.get("previous_volume"),
+                "volume_vs_previous_pct": row.get("volume_vs_previous_pct"),
                 "source": row.get("source"),
                 "timestamp": row.get("timestamp"),
             }
@@ -917,6 +1315,7 @@ def _theme_leader_rows_from_quotes(quotes: dict[str, dict[str, Any]], basket: di
             "symbol": symbol,
             "pct_change": round(pct, 2),
             "price": quote.get("price"),
+            **_quote_volume_fields(quote),
             "source": quote.get("source"),
             "timestamp": quote.get("timestamp") or quote.get("collected_at"),
         }
@@ -968,16 +1367,18 @@ def _current_strength_against_previous_close_line(quotes: dict[str, dict[str, An
         pct = _pct_change(quote)
         if price is None or previous in (None, 0) or pct is None or pct <= 0:
             continue
-        rows.append({
+        row = {
             "symbol": symbol,
             "price": price,
             "pct_change": pct,
             "source": quote.get("price_source") or quote.get("source"),
-        })
+        }
+        row.update(_quote_volume_fields(quote))
+        rows.append(row)
     rows.sort(key=lambda row: row["pct_change"], reverse=True)
     if not rows:
         return "전일종가 대비 현재 강세: 데이터 부족 / 기준 전일 정규장 종가 대비 현재가 / 출처 Yahoo chart 1m includePrePost"
-    parts = [f"{row['symbol']} {_fmt_pct(row['pct_change'])} 가격 {_fmt_price(row['price'])}" for row in rows[:limit]]
+    parts = [f"{row['symbol']} {_fmt_pct(row['pct_change'])} 가격 {_fmt_price(row['price'])}{_volume_inline_text(row)}" for row in rows[:limit]]
     source = "Yahoo chart 1m includePrePost"
     return f"전일종가 대비 현재 강세: {' | '.join(parts)} / 기준 전일 정규장 종가 대비 현재가 / 출처 {source}"
 
@@ -994,20 +1395,43 @@ def _etf_context_line(strong: list[dict[str, Any]], weak: list[dict[str, Any]]) 
     return f"ETF 시장 참고: {strong_part} / {weak_part}"
 
 
-_DISPLAY_BENCHMARKS = (
-    ("^IXIC", "NASDAQ"),
-    ("SPY", "SPY"),
-    ("SOXX", "SOXX"),
-    ("BTC-USD", "BTCUSDT"),
-    ("CL=F", "WTI"),
-    ("^VIX", "VIX"),
+_DISPLAY_BENCHMARKS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("NQ=F", "^IXIC"), "NASDAQ"),
+    (("SPY",), "SPY"),
+    (("SOXX",), "SOXX"),
+    (("BTC-USD",), "BTCUSDT"),
+    (("CL=F",), "WTI"),
+    (("^VIX",), "VIX"),
 )
+
+
+def _benchmark_quote(normalized: dict[str, dict[str, Any]], symbols: tuple[str, ...]) -> dict[str, Any]:
+    for symbol in symbols:
+        quote = normalized.get(symbol)
+        if isinstance(quote, dict) and _pct_change(quote) is not None:
+            return quote
+    return {}
+
+
+def _benchmark_pct(normalized: dict[str, dict[str, Any]], symbols: tuple[str, ...]) -> float | None:
+    return _pct_change(_benchmark_quote(normalized, symbols))
+
+
+def _benchmark_intraday_pct(normalized: dict[str, dict[str, Any]], symbols: tuple[str, ...], minutes: int) -> float | None:
+    for symbol in symbols:
+        quote = normalized.get(symbol)
+        if not isinstance(quote, dict):
+            continue
+        pct = _intraday_pct_change(quote, minutes)
+        if pct is not None:
+            return pct
+    return None
 
 
 def _benchmark_snapshot(normalized: dict[str, dict[str, Any]]) -> dict[str, float]:
     snapshot: dict[str, float] = {}
-    for symbol, display in _DISPLAY_BENCHMARKS:
-        pct = _pct_change(normalized.get(symbol, {}))
+    for symbols, display in _DISPLAY_BENCHMARKS:
+        pct = _benchmark_pct(normalized, symbols)
         if pct is not None:
             snapshot[display] = round(float(pct), 2)
     return snapshot
@@ -1015,8 +1439,8 @@ def _benchmark_snapshot(normalized: dict[str, dict[str, Any]]) -> dict[str, floa
 
 def _benchmark_context_line(normalized: dict[str, dict[str, Any]], collected_at: str) -> str:
     parts = []
-    for symbol, display in _DISPLAY_BENCHMARKS:
-        pct = _pct_change(normalized.get(symbol, {}))
+    for symbols, display in _DISPLAY_BENCHMARKS:
+        pct = _benchmark_pct(normalized, symbols)
         # Keep the benchmark label set stable in Telegram alerts even when a
         # quote provider temporarily misses one symbol, especially ^IXIC on
         # Windows/Yahoo. The value is explicit n/a rather than silently
@@ -1094,8 +1518,8 @@ def _build_risk_spike_context(normalized: dict[str, dict[str, Any]]) -> dict[str
         score += 1
 
     market_parts: list[str] = []
-    for symbol, display in (("^IXIC", "NASDAQ"), ("SPY", "SPY"), ("SOXX", "SOXX")):
-        pct = _intraday_pct_change(normalized.get(symbol, {}), 5)
+    for symbols, display in ((("NQ=F", "^IXIC"), "NASDAQ"), (("SPY",), "SPY"), (("SOXX",), "SOXX")):
+        pct = _benchmark_intraday_pct(normalized, symbols, 5)
         if pct is not None and pct <= -0.3:
             market_parts.append(f"{display} 5m {_fmt_pct(pct)}")
     if market_parts and triggers:
@@ -1175,7 +1599,7 @@ def _build_flow_proxy_context(theme_baskets: list[dict[str, Any]], spy_pct: floa
             if _to_float(row.get("pct_change_5m")) is not None
         )
         parts = [
-            f"{theme.get('name') or theme.get('key')} 기관성 유입 의심(거래대금/VWAP 기반 proxy)",
+            f"{theme.get('name') or theme.get('key')} 기관성 유입 의심",
             f"거래대금 {_fmt_trading_value(trading_value)}" if trading_value is not None else "거래대금 n/a",
             f"상승비율 {breadth:.1f}%" if breadth is not None else "상승비율 n/a",
             f"SPY 대비 {_fmt_pct(relative)}" if relative is not None else "SPY 대비 n/a",
@@ -1232,12 +1656,14 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
 
     ranked = _rank_sector_quotes(normalized, spy_pct)
     theme_baskets = _rank_theme_baskets(normalized, spy_pct)
+    previous_day_theme_baskets = _rank_previous_day_theme_baskets(normalized, _quote_previous_day_pct(normalized.get("SPY", {})))
     sub_theme_baskets = _rank_sub_theme_baskets(normalized, spy_pct)
     watchlist_movers = _rank_watchlist_movers(theme_baskets, sub_theme_baskets)
     strong = ranked[:top_n]
     weak = sorted(ranked, key=lambda row: row["strength_score"])[:top_n]
-    strong_themes = theme_baskets[:top_n]
-    weak_themes = sorted(theme_baskets, key=lambda row: row["strength_score"])[:top_n]
+    strong_themes = _positive_theme_rows(theme_baskets)
+    weak_themes = _negative_theme_rows(sorted(theme_baskets, key=lambda row: row["strength_score"]))
+    previous_day_strong_themes = _positive_previous_day_theme_rows(previous_day_theme_baskets)
     strong_sub_themes = sub_theme_baskets[:top_n]
     weak_sub_themes = sorted(sub_theme_baskets, key=lambda row: row["strength_score"])[:top_n]
     rotation_alerts = _build_rotation_alerts(strong_sub_themes, weak_sub_themes)
@@ -1245,8 +1671,16 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
     risk_spikes = _build_risk_spike_context(normalized)
     flow_proxies = _build_flow_proxy_context(theme_baskets, spy_pct)
     regime_text = regime["korean_label"]
-    leader = strong_themes[0]["name"] if strong_themes else (strong[0]["symbol"] if strong else "n/a")
-    laggard = weak_themes[0]["name"] if weak_themes else (weak[0]["symbol"] if weak else "n/a")
+    if theme_baskets:
+        leader = strong_themes[0]["name"] if strong_themes else "강한 테마 기준 해당 없음"
+        laggard = weak_themes[0]["name"] if weak_themes else "약한 테마 기준 해당 없음"
+        leader_summary = f"{leader} 주도" if strong_themes else leader
+        laggard_summary = f"{laggard} 약세" if weak_themes else laggard
+    else:
+        leader = strong[0]["symbol"] if strong else "n/a"
+        laggard = weak[0]["symbol"] if weak else "n/a"
+        leader_summary = f"{leader} 주도"
+        laggard_summary = f"{laggard} 약세"
     if strong_themes and weak_themes and strong_themes[0].get("key") == weak_themes[0].get("key") and strong_sub_themes and weak_sub_themes:
         leader = f"{strong_sub_themes[0]['parent_name']} > {strong_sub_themes[0]['name']}"
         laggard = f"{weak_sub_themes[0]['parent_name']} > {weak_sub_themes[0]['name']}"
@@ -1259,6 +1693,7 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
     focus_lines.extend([
         _theme_line_for("강한 테마", strong_themes),
         _theme_line_for("약한 테마", weak_themes),
+        _previous_day_theme_line_for("전날 강했던 테마", previous_day_strong_themes),
         _sub_theme_line_for("강한 세부테마", strong_sub_themes),
         _sub_theme_line_for("약한 세부테마", weak_sub_themes),
     ])
@@ -1278,7 +1713,7 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
         "약한 테마 반등 매수는 VIX 안정과 SPY 회복 확인 후 판단",
     ]
     if flow_proxies.get("active"):
-        next_actions.insert(0, "기관성 유입 의심은 거래대금/VWAP/상대강도 기반 proxy로만 보고 단정 금지")
+        next_actions.insert(0, "기관성 유입 의심은 실제 기관 순매수로 단정 금지")
     if risk_spikes.get("active"):
         next_actions.insert(0, "VIX/WTI 분봉 리스크 급등: 강한 테마도 추격보다 VWAP 눌림 대기")
     if rotation_alerts:
@@ -1294,7 +1729,7 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
 
     return {
         "available": True,
-        "summary": f"{summary_prefix}: {leader} 주도 / {laggard} 약세 / 장 분위기 {regime_text}",
+        "summary": f"{summary_prefix}: {leader_summary} / {laggard_summary} / 장 분위기 {regime_text}",
         "collected_at": collected_at,
         "benchmarks": _benchmark_snapshot(normalized),
         "strong": strong,
@@ -1302,6 +1737,8 @@ def build_sector_strength_report(quotes: dict[str, Any], collected_at: str | Non
         "theme_baskets": theme_baskets,
         "strong_themes": strong_themes,
         "weak_themes": weak_themes,
+        "previous_day_theme_baskets": previous_day_theme_baskets,
+        "previous_day_strong_themes": previous_day_strong_themes,
         "sub_theme_baskets": sub_theme_baskets,
         "strong_sub_themes": strong_sub_themes,
         "weak_sub_themes": weak_sub_themes,
@@ -1538,6 +1975,78 @@ def build_market_regime_report(quotes: dict[str, Any], collected_at: str | None 
     }
 
 
+def _apply_previous_day_fields_from_daily_rows(quote: dict[str, Any], daily_rows: Any) -> None:
+    if not isinstance(daily_rows, list):
+        return
+    rows: list[dict[str, Any]] = []
+    for raw in daily_rows:
+        if not isinstance(raw, dict):
+            continue
+        close = _to_float(raw.get("close"))
+        date_text = str(raw.get("session_date") or "").strip()
+        if close is None or not date_text:
+            continue
+        rows.append(
+            {
+                "date": date_text,
+                "close": close,
+                "volume": _to_float(raw.get("volume")),
+            }
+        )
+    rows.sort(key=lambda row: row["date"])
+    if len(rows) < 2:
+        return
+
+    current_date = _et_session_date_key(quote.get("timestamp") or quote.get("regular_market_time"))
+    previous_idx = len(rows) - 1
+    if current_date and rows[-1]["date"] >= current_date and len(rows) >= 2:
+        previous_idx = len(rows) - 2
+    if previous_idx <= 0:
+        return
+
+    previous_row = rows[previous_idx]
+    base_row = rows[previous_idx - 1]
+    base_close = _to_float(base_row.get("close"))
+    previous_close = _to_float(previous_row.get("close"))
+    if base_close in (None, 0) or previous_close is None:
+        return
+
+    pct = ((previous_close - float(base_close)) / float(base_close)) * 100
+    quote["previous_day_date"] = previous_row["date"]
+    quote["previous_day_close"] = round(previous_close, 2)
+    quote["previous_day_previous_close"] = round(float(base_close), 2)
+    quote["previous_day_pct_change"] = round(pct, 2)
+    volume = _to_float(previous_row.get("volume"))
+    if volume is not None:
+        quote["previous_day_volume"] = int(volume)
+        quote["previous_day_trading_value"] = round(previous_close * volume, 2)
+
+
+def _apply_daily_technical_fields(symbol: str, quote: dict[str, Any], fetch_chart_pack: Any) -> None:
+    _clear_technical_fields(quote)
+    try:
+        daily_pack = fetch_chart_pack(symbol, range_="6mo", interval="1d")
+    except Exception as exc:
+        quote["technical_warning"] = str(exc)
+        return
+
+    if not (isinstance(daily_pack, dict) and daily_pack.get("available") and isinstance(daily_pack.get("quote"), dict)):
+        if isinstance(daily_pack, dict) and daily_pack.get("warning"):
+            quote["technical_warning"] = daily_pack.get("warning")
+        return
+
+    daily_quote = daily_pack["quote"]
+    _apply_previous_day_fields_from_daily_rows(quote, daily_quote.get("daily_ohlcv"))
+    daily_technicals = _technical_fields(daily_quote)
+    if not daily_technicals:
+        return
+    quote.update(daily_technicals)
+    quote["technical_source"] = daily_pack.get("source") or daily_quote.get("source")
+    quote["technical_timestamp"] = daily_quote.get("timestamp") or daily_pack.get("collected_at")
+    quote["technical_range"] = "6mo"
+    quote["technical_interval"] = "1d"
+
+
 def fetch_sector_strength_quotes(symbols: tuple[str, ...] | list[str] | None = None) -> dict[str, dict[str, Any]]:
     try:
         from ..market_data.yfinance import fetch_toss_wts_quote_packs, fetch_yahoo_chart_quote_pack, fetch_yfinance_quote_pack
@@ -1565,6 +2074,8 @@ def fetch_sector_strength_quotes(symbols: tuple[str, ...] | list[str] | None = N
             quote["warning"] = pack.get("warning")
         if pack.get("warnings") if isinstance(pack, dict) else False:
             quote["warnings"] = pack.get("warnings")
+
+        _apply_daily_technical_fields(symbol, quote, fetch_yahoo_chart_quote_pack)
 
         toss_pack = toss_packs.get(symbol) if isinstance(toss_packs, dict) else None
         if isinstance(toss_pack, dict) and toss_pack.get("available") and isinstance(toss_pack.get("quote"), dict):
