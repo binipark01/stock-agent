@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -630,6 +631,32 @@ class SectorStrengthAlertRunnerTest(unittest.TestCase):
         self.assertIn("주도 NVDA +3.00%, AMD +4.00%, SNDK +8.00%, MU +4.00%, INTC +2.00%", result["focus"][1])
         self.assertEqual(result["data"]["sector_strength"]["strong_themes"][0]["llm_leader_rerank"]["max_leaders"], 5)
         self.assertEqual(result["data"]["sector_strength"]["llm_leader_rerank"]["changed_theme_count"], 1)
+
+    def test_llm_prompts_are_loaded_from_agent_prompt_files(self) -> None:
+        from scripts import run_sector_strength_alerts as runner
+
+        request_payload = {
+            "leader_selection": {"minimum": 3, "maximum": 5},
+            "themes": [
+                {
+                    "key": "semiconductors",
+                    "name": "반도체",
+                    "candidates": [{"symbol": "NVDA"}, {"symbol": "AMD"}, {"symbol": "MU"}],
+                }
+            ],
+        }
+
+        with patch.dict("os.environ", {"SECTOR_ALERT_LLM_MIN_LEADERS": "3", "SECTOR_ALERT_LLM_MAX_LEADERS": "5"}):
+            system_prompt = runner._llm_system_prompt()
+            user_prompt = runner._llm_prompt_payload(request_payload)
+        parsed = json.loads(user_prompt)
+
+        self.assertIn("US theme leader reranker", system_prompt)
+        self.assertIn("3 to 5 symbols", system_prompt)
+        self.assertEqual(parsed["agent"], "theme_leader_reranker")
+        self.assertEqual(parsed["task"], "각 테마에서 최종 대장주를 3~5개 고르거나 재정렬해라.")
+        self.assertIn("후보에 없는 symbol은 절대 만들지 말 것", parsed["rules"])
+        self.assertEqual(parsed["input"], request_payload)
 
     def test_build_sector_response_does_not_enrich_symbol_issues_by_default(self) -> None:
         from scripts import run_sector_strength_alerts as runner

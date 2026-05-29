@@ -80,6 +80,36 @@ def response_builder_for_mode(mode: str) -> ResponseBuilder:
 YAHOO_FINANCE_SEARCH_URL = "https://query1.finance.yahoo.com/v1/finance/search"
 SYMBOL_ISSUE_CACHE_VERSION = 5
 THEME_NEWS_CACHE_VERSION = 4
+DEFAULT_LLM_AGENT = "theme_leader_reranker"
+DEFAULT_THEME_LEADER_SYSTEM_PROMPT = (
+    "You are the US theme leader reranker for a short market alert.\n"
+    "Choose {{MIN_LEADERS}} to {{MAX_LEADERS}} symbols when candidates allow it.\n"
+    "Choose only symbols that are present in candidates.\n"
+    "Return only valid JSON following the user prompt schema."
+)
+DEFAULT_THEME_LEADER_USER_PROMPT = """{
+  "agent": "theme_leader_reranker",
+  "task": "각 테마에서 최종 대장주를 {{MIN_LEADERS}}~{{MAX_LEADERS}}개 고르거나 재정렬해라.",
+  "rules": [
+    "후보에 없는 symbol은 절대 만들지 말 것",
+    "테마 대표성(theme_anchor), 오늘 등락률, 거래대금, 거래대금 전일대비 증가, 거래량 증가, theme_news/issue를 함께 판단",
+    "RSI가 높다는 이유만으로 감점하지 말 것",
+    "SPY 대비 상대강도는 판단 기준에서 제외",
+    "잡주성 급등보다 테마를 대표하면서 돈이 붙은 종목을 우선",
+    "후보가 충분하면 {{MIN_LEADERS}}개 이상, 확실한 대장주가 더 있으면 {{MAX_LEADERS}}개까지 허용",
+    "확신이 낮은 종목으로 억지로 {{MAX_LEADERS}}개를 채우지 말 것"
+  ],
+  "return_schema": {
+    "themes": [
+      {
+        "key": "theme key",
+        "leaders": ["AAA", "BBB", "CCC", "DDD"],
+        "reason": "짧은 한국어 이유"
+      }
+    ]
+  },
+  "input": {{REQUEST_PAYLOAD_JSON}}
+}"""
 GENERIC_COMPANY_WORDS = {
     "the",
     "and",
@@ -1122,6 +1152,35 @@ def _llm_bool(value: Any) -> bool:
     return numeric is not None and numeric > 0
 
 
+def _safe_prompt_agent_name(agent: str) -> str:
+    cleaned = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(agent or "").strip())
+    cleaned = cleaned.strip("._")
+    return cleaned or DEFAULT_LLM_AGENT
+
+
+def _prompt_root() -> Path:
+    raw = str(os.getenv("SECTOR_ALERT_PROMPT_DIR") or "").strip()
+    return Path(raw) if raw else ROOT / "prompts" / "us_agents"
+
+
+def _load_agent_prompt(agent: str, kind: str, fallback: str) -> str:
+    safe_agent = _safe_prompt_agent_name(agent)
+    safe_kind = "system" if kind == "system" else "user"
+    path = _prompt_root() / safe_agent / f"{safe_kind}.md"
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        text = ""
+    return text or fallback.strip()
+
+
+def _render_agent_prompt(template: str, values: dict[str, Any]) -> str:
+    rendered = template
+    for key, value in values.items():
+        rendered = rendered.replace(f"{{{{{key}}}}}", str(value))
+    return rendered.strip()
+
+
 def _llm_leader_count_bounds() -> tuple[int, int]:
     minimum = _env_int("SECTOR_ALERT_LLM_MIN_LEADERS", 3, minimum=1, maximum=5)
     maximum = _env_int("SECTOR_ALERT_LLM_MAX_LEADERS", 5, minimum=minimum, maximum=5)
@@ -1275,31 +1334,27 @@ def _llm_prompt_payload(request_payload: dict[str, Any]) -> str:
     selection = request_payload.get("leader_selection") if isinstance(request_payload.get("leader_selection"), dict) else {}
     min_leaders = int(selection.get("minimum") or 3)
     max_leaders = int(selection.get("maximum") or 5)
-    return json.dumps(
+    request_payload_json = json.dumps(request_payload, ensure_ascii=False, separators=(",", ":"))
+    template = _load_agent_prompt(DEFAULT_LLM_AGENT, "user", DEFAULT_THEME_LEADER_USER_PROMPT)
+    return _render_agent_prompt(
+        template,
         {
-            "task": f"각 테마에서 최종 대장주를 {min_leaders}~{max_leaders}개 고르거나 재정렬해라.",
-            "rules": [
-                "후보에 없는 symbol은 절대 만들지 말 것",
-                "테마 대표성(theme_anchor), 오늘 등락률, 거래대금, 거래대금 전일대비 증가, 거래량 증가, theme_news/issue를 함께 판단",
-                "RSI가 높다는 이유만으로 감점하지 말 것",
-                "SPY 대비 상대강도는 판단 기준에서 제외",
-                "잡주성 급등보다 테마를 대표하면서 돈이 붙은 종목을 우선",
-                f"후보가 충분하면 {min_leaders}개 이상, 확실한 대장주가 더 있으면 {max_leaders}개까지 허용",
-                f"확신이 낮은 종목으로 억지로 {max_leaders}개를 채우지 말 것",
-            ],
-            "return_schema": {"themes": [{"key": "theme key", "leaders": ["AAA", "BBB", "CCC", "DDD"], "reason": "짧은 한국어 이유"}]},
-            "input": request_payload,
+            "MIN_LEADERS": min_leaders,
+            "MAX_LEADERS": max_leaders,
+            "REQUEST_PAYLOAD_JSON": request_payload_json,
         },
-        ensure_ascii=False,
-        separators=(",", ":"),
     )
 
 
 def _llm_system_prompt() -> str:
-    return (
-        "You rerank US stock theme leader candidates for a short market alert. "
-        "Choose 3 to 5 symbols when candidates allow it. "
-        "Choose only symbols that are present in candidates. Return only valid JSON."
+    min_leaders, max_leaders = _llm_leader_count_bounds()
+    template = _load_agent_prompt(DEFAULT_LLM_AGENT, "system", DEFAULT_THEME_LEADER_SYSTEM_PROMPT)
+    return _render_agent_prompt(
+        template,
+        {
+            "MIN_LEADERS": min_leaders,
+            "MAX_LEADERS": max_leaders,
+        },
     )
 
 
