@@ -13,8 +13,6 @@ research_manager
   ↓
 trade_plan_builder
   ↓
-quant_signal_guard
-  ↓
 portfolio_risk_manager
   ↓
 Discord/Telegram 알림 또는 사용자 질의 응답
@@ -28,12 +26,10 @@ Discord/Telegram 알림 또는 사용자 질의 응답
 4. `bull_researcher`와 `bear_researcher`는 같은 입력을 반대로 검토한다.
 5. `research_manager`는 5단계 rating을 낸다: Buy / Overweight / Hold / Underweight / Sell.
 6. `trade_plan_builder`는 Buy/Hold/Sell, entry zone, invalidation, sizing guide만 낸다.
-7. `quant_signal_guard`가 데이터 품질/blackout/기계적 signal 충돌을 막는다.
-8. `portfolio_risk_manager`가 최종 approve/downsize/defer/reject를 낸다.
-9. 어떤 단계도 실제 주문을 실행하지 않는다.
+7. `portfolio_risk_manager`가 포트폴리오 집중도, 상관관계, 장세 리스크로 최종 approve/downsize/defer/reject를 낸다.
+8. 어떤 단계도 실제 주문을 실행하지 않는다.
 
 ## 지금 바로 재사용 가능한 부분
 
 - 현재 cron의 `theme_leader_reranker`는 그대로 유지.
 - Discord 명령형 agent를 만들 때 `/market`, `/theme`, `/stock`, `/plan` 명령은 위 agent prompt를 조합하면 된다.
-- paper/rebalance 기능은 `us-quant-trader` 쪽처럼 별도 risk gate를 둔 뒤에만 연결한다.

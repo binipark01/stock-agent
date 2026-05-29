@@ -5,7 +5,7 @@
     "action은 Buy/Hold/Sell 중 하나",
     "entry는 단일 가격보다 zone 또는 조건으로 제시",
     "stop/invalidation은 반드시 포함",
-    "position_sizing은 max_position_weight, market_regime, confidence를 반영",
+    "position_sizing은 시장 장세, 확신도, 변동성, 손절폭을 반영해 보수적으로 제시",
     "실제 주문 실행 문구나 보장 표현은 금지"
   ],
   "return_schema": {

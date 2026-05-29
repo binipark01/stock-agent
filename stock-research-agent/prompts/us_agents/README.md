@@ -33,12 +33,8 @@ prompts/us_agents/<agent_name>/user.md
 | `bear_researcher` | 하락/주의 논리와 리스크 트리거 구성 |
 | `research_manager` | bull/bear/분석 결과를 5단계 rating으로 종합 |
 | `trade_plan_builder` | rating을 진입/무효화/비중 가이드로 변환 |
-| `portfolio_risk_manager` | 포트폴리오 한도와 장세 리스크로 최종 축소/보류/거절 판단 |
-| `quant_signal_guard` | 기계적 시그널, 데이터 품질, blackout, risk cap 충돌 검사 |
+| `portfolio_risk_manager` | 포트폴리오/상관관계/장세 리스크로 최종 축소/보류/거절 판단 |
 
 ## 가져온 설계 아이디어
 
 - `D:\Agents\TradingAgents`: analyst → bull/bear debate → research manager → trader → risk/portfolio manager 흐름.
-- `D:\Agents\us-quant-trader`: 데이터 품질 검사, signal scan, target weight, risk policy, blackout guard 개념.
-
-코드는 직접 복사하지 않고, 우리 미장 알림/Discord 에이전트에 맞는 prompt 계약으로 재작성했다.

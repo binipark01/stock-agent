@@ -13,7 +13,6 @@ EXPECTED_AGENTS = {
     "research_manager",
     "trade_plan_builder",
     "portfolio_risk_manager",
-    "quant_signal_guard",
 }
 
 
