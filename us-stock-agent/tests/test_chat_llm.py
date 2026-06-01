@@ -60,7 +60,16 @@ class ChatLlmTest(unittest.TestCase):
             base_env = {"CODEX_HOME": str(home)}
 
             self.assertEqual(resolve_settings({**base_env, "US_STOCK_AGENT_LLM_MODEL_CLASS": "standard"}).model, "standard-model")
-            self.assertEqual(resolve_settings({**base_env, "US_STOCK_AGENT_LLM_MODEL_CLASS": "spark"}).model, "spark-model")
+            self.assertEqual(
+                resolve_settings(
+                    {
+                        **base_env,
+                        "US_STOCK_AGENT_LLM_MODEL_CLASS": "spark",
+                        "DISCORD_AGENT_LLM_MODEL_CLASS": "standard",
+                    }
+                ).model,
+                "spark-model",
+            )
             self.assertEqual(
                 resolve_settings(
                     {

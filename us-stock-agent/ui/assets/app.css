@@ -119,6 +119,30 @@ button {
   padding: 12px;
 }
 
+.model-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px;
+}
+
+.model-fields {
+  display: grid;
+  gap: 9px;
+  margin-top: 8px;
+}
+
+.compact-field {
+  gap: 5px;
+}
+
+.compact-field input,
+.compact-field select {
+  min-height: 34px;
+  padding: 7px 9px;
+  font-size: 13px;
+}
+
 .profile-row {
   display: flex;
   align-items: center;
