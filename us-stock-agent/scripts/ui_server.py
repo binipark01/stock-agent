@@ -116,20 +116,11 @@ def _llm_env_overrides(body: dict[str, Any]) -> dict[str, str]:
         if len(model) > 120 or any(char in model for char in "\r\n\t"):
             raise ValueError("invalid llm_model")
         overrides["US_STOCK_AGENT_LLM_MODEL"] = model
-    model_class = str(body.get("llm_model_class") or "").strip().lower()
-    if model_class:
-        aliases = {
-            "frontier": "frontier",
-            "main": "frontier",
-            "standard": "standard",
-            "std": "standard",
-            "spark": "spark",
-            "fast": "spark",
-            "low": "spark",
-        }
-        if model_class not in aliases:
-            raise ValueError("unsupported llm_model_class")
-        overrides["US_STOCK_AGENT_LLM_MODEL_CLASS"] = aliases[model_class]
+    reasoning_effort = str(body.get("llm_reasoning_effort") or "").strip().lower()
+    if reasoning_effort:
+        if reasoning_effort not in {"low", "medium", "high", "xhigh"}:
+            raise ValueError("unsupported llm_reasoning_effort")
+        overrides["US_STOCK_AGENT_LLM_REASONING_EFFORT"] = reasoning_effort
     return overrides
 
 

@@ -52,35 +52,35 @@ function saveHistory(item) {
 function loadModelSettings() {
   try {
     const parsed = JSON.parse(localStorage.getItem("us-stock-agent-model-settings") || "{}");
-    const level = ["frontier", "standard", "spark"].includes(parsed.level) ? parsed.level : "frontier";
     const model = typeof parsed.model === "string" ? parsed.model : "";
-    return { level, model };
+    const reasoning = ["low", "medium", "high", "xhigh"].includes(parsed.reasoning) ? parsed.reasoning : "";
+    return { model, reasoning };
   } catch {
-    return { level: "frontier", model: "" };
+    return { model: "", reasoning: "" };
   }
 }
 
 function saveModelSettings() {
   state.modelSettings = {
-    level: $("#modelLevel").value || "frontier",
-    model: $("#modelInput").value.trim()
+    model: $("#modelInput").value.trim(),
+    reasoning: $("#reasoningLevel").value || ""
   };
   localStorage.setItem("us-stock-agent-model-settings", JSON.stringify(state.modelSettings));
   renderModelStatus();
 }
 
 function renderModelStatus(response = null) {
-  const model = response?.model || state.modelSettings.model || "OMX 기본값";
-  const level = state.modelSettings.level || "frontier";
-  $("#topMeta").textContent = response ? `${model} · ${level}` : `${level} · ${model}`;
+  const model = response?.model || state.modelSettings.model || "OMX 기본 모델";
+  const reasoning = response?.reasoning_effort || state.modelSettings.reasoning || "OMX 기본 추론";
+  $("#topMeta").textContent = `${model} · ${reasoning}`;
 }
 
 function setupModelControls() {
-  $("#modelLevel").value = state.modelSettings.level;
   $("#modelInput").value = state.modelSettings.model;
-  $("#modelLevel").addEventListener("change", saveModelSettings);
+  $("#reasoningLevel").value = state.modelSettings.reasoning;
   $("#modelInput").addEventListener("change", saveModelSettings);
   $("#modelInput").addEventListener("blur", saveModelSettings);
+  $("#reasoningLevel").addEventListener("change", saveModelSettings);
   renderModelStatus();
 }
 
@@ -368,7 +368,7 @@ async function runRequest(event) {
         ...command,
         history: state.messages.slice(-12),
         llm_model: state.modelSettings.model,
-        llm_model_class: state.modelSettings.level
+        llm_reasoning_effort: state.modelSettings.reasoning
       })
     });
     const payload = await res.json();

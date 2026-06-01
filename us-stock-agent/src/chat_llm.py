@@ -472,6 +472,7 @@ def _chat_response(content: str, *, settings: LLMSettings, result: LLMResult | N
         "next_actions": [],
         "features": features,
         "model": settings.model,
+        "reasoning_effort": settings.reasoning_effort,
         "provider": settings.provider,
         "command": result.command if result else "",
     }

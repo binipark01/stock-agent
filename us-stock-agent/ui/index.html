@@ -32,16 +32,24 @@
         <div class="section-label">Model</div>
         <div class="model-fields">
           <label class="field compact-field">
-            <span>수준</span>
-            <select id="modelLevel" name="modelLevel">
-              <option value="frontier">Frontier</option>
-              <option value="standard">Standard</option>
-              <option value="spark">Spark</option>
-            </select>
+            <span>모델</span>
+            <input id="modelInput" name="modelInput" type="text" list="modelOptions" placeholder="OMX 기본 모델">
+            <datalist id="modelOptions">
+              <option value="gpt-5.5"></option>
+              <option value="gpt-5.4"></option>
+              <option value="gpt-5.4-mini"></option>
+              <option value="gpt-5.3-codex-spark"></option>
+            </datalist>
           </label>
           <label class="field compact-field">
-            <span>모델</span>
-            <input id="modelInput" name="modelInput" type="text" placeholder="OMX 기본값">
+            <span>추론 수준</span>
+            <select id="reasoningLevel" name="reasoningLevel">
+              <option value="">OMX 기본값</option>
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="xhigh">XHigh</option>
+            </select>
           </label>
         </div>
       </section>
