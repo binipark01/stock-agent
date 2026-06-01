@@ -60,3 +60,16 @@ stock-research-agent/tools/bootstrap/get-pip.py
 
 # Hermes local plans/cache
 .hermes/
+
+# Adjacent local agent checkouts managed outside this repository
+DiscordAgent/
+coding-agent/
+deepcode-agent/
+hermes-llm-proxy/
+kr-stock-agent/
+orchestrator/
+personal-ops-agent/
+quant-trade-agent/
+research-agent/
+style-miner-agent/
+us-quant-trader/
