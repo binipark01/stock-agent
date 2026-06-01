@@ -16,11 +16,12 @@ Windows:
 .\scripts\start_ui_windows.ps1
 ```
 
-General chat messages use an OpenAI-compatible chat endpoint when configured:
+General chat messages use the same Codex/OMX LLM path as the Discord agent by default:
 
 ```powershell
-$env:OPENAI_API_KEY="..."
-$env:OPENAI_MODEL="gpt-4o-mini"
+$env:US_STOCK_AGENT_LLM_PROVIDER="codex"
 ```
 
+The Codex/OMX provider reads model settings in this order: `OMX_DEFAULT_FRONTIER_MODEL`,
+`~/.codex/.omx-config.json`, then `~/.codex/config.toml`.
 Stock requests such as `NVDA 체크해줘` still use the local stock agent.
