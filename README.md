@@ -12,8 +12,8 @@ This repository currently focuses on:
 
 - [`us-stock-agent`](./us-stock-agent): US market, sector, theme, filing, social, and alert workflows.
 - [`us-stock-agent`](./us-stock-agent): 미국주식 시장/섹터/테마/공시/social/알림 에이전트.
-- [`kr-stock-agent`](./kr-stock-agent): KRX/Kiwoom flow, theme, and local analysis workflows.
-- [`kr-stock-agent`](./kr-stock-agent): KRX/Kiwoom 수급/테마/로컬 분석 에이전트.
+- [`kr-stock-agent`](https://github.com/binipark01/KR-Stock-Agent): KRX/Kiwoom flow, theme, and local analysis workflows. Local workspace path: `D:\Agents\kr-stock-agent`.
+- [`kr-stock-agent`](https://github.com/binipark01/KR-Stock-Agent): KRX/Kiwoom 수급/테마/로컬 분석 에이전트. 로컬 workspace 경로: `D:\Agents\kr-stock-agent`.
 - [`market-terminal-agent`](./market-terminal-agent): Browser-based command-first market terminal prototype.
 - [`market-terminal-agent`](./market-terminal-agent): 명령어 중심 로컬 금융 터미널 프로토타입.
 - [`deepcode-agent`](./deepcode-agent): Hermes/orchestrator wrapper for HKUDS/DeepCode Paper2Code/Text2Web/Text2Backend.
@@ -217,7 +217,7 @@ Use example files such as `*.env.example` for documentation only.
 
 ## Stock agent split
 
-`stock-research-agent` is being split into dedicated specialists:
+`stock-research-agent` has been split into dedicated specialists:
 
 - us-stock-agent for US market/sector/theme workflows.
 - kr-stock-agent for KRX/Kiwoom flow/theme workflows.
