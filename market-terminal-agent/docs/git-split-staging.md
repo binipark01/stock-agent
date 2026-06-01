@@ -34,12 +34,17 @@ market-terminal-agent\.venv\
 market-terminal-agent\.pytest_cache\
 market-terminal-agent\logs\
 market-terminal-agent\__pycache__\
+market-terminal-agent\data\probes\
 market-terminal-agent\data\kiwoom_token*.json
 market-terminal-agent\*.env
 market-terminal-agent\config\kiwoom.env
+market-terminal-agent\tools\cloudflared*
+market-terminal-agent\tools\bootstrap\get-pip.py
+market-terminal-agent\scripts\krx_alerts\*.last.txt
+market-terminal-agent\scripts\krx_alerts\*.issue_candidates.json
 ```
 
-`.gitignore`에는 `logs/`를 추가했다. 서버 smoke 중 생기는 `logs/market_terminal_8898*.log`가 source split에 섞이지 않게 하기 위함이다.
+`.gitignore`에는 local server log, probe output, local bootstrap/binary, alert runtime marker를 추가했다. 서버 smoke와 probe 중 생기는 산출물이 source split에 섞이지 않게 하기 위함이다.
 
 ## stock-research-agent 삭제분
 
