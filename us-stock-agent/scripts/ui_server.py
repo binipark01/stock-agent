@@ -109,6 +109,30 @@ def _agent_request_payload(body: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def _llm_env_overrides(body: dict[str, Any]) -> dict[str, str]:
+    overrides: dict[str, str] = {}
+    model = str(body.get("llm_model") or "").strip()
+    if model:
+        if len(model) > 120 or any(char in model for char in "\r\n\t"):
+            raise ValueError("invalid llm_model")
+        overrides["US_STOCK_AGENT_LLM_MODEL"] = model
+    model_class = str(body.get("llm_model_class") or "").strip().lower()
+    if model_class:
+        aliases = {
+            "frontier": "frontier",
+            "main": "frontier",
+            "standard": "standard",
+            "std": "standard",
+            "spark": "spark",
+            "fast": "spark",
+            "low": "spark",
+        }
+        if model_class not in aliases:
+            raise ValueError("unsupported llm_model_class")
+        overrides["US_STOCK_AGENT_LLM_MODEL_CLASS"] = aliases[model_class]
+    return overrides
+
+
 def build_api_response(
     body: dict[str, Any],
     *,
@@ -118,7 +142,14 @@ def build_api_response(
     explicit_mode = _mode_value(body.get("mode"))
     request_text = str(body.get("request") or "").strip() or "오늘 미국장 체크포인트 정리해줘"
     if should_use_llm_chat(request_text, explicit_mode=explicit_mode):
-        return {"ok": True, "response": chat_runner(request_text, history=body.get("history"))}
+        return {
+            "ok": True,
+            "response": chat_runner(
+                request_text,
+                history=body.get("history"),
+                env=_llm_env_overrides(body),
+            ),
+        }
     response = agent_runner(
         _agent_request_payload(body),
         runtime_context=_runtime_context(body),

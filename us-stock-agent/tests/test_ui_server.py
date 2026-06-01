@@ -53,9 +53,10 @@ class UiServerTest(unittest.TestCase):
         def fake_agent(*args, **kwargs):
             raise AssertionError("stock agent should not handle general chat")
 
-        def fake_chat(request_text, history=None):
+        def fake_chat(request_text, history=None, env=None):
             calls["request_text"] = request_text
             calls["history"] = history
+            calls["env"] = env
             return {"agent": "llm", "mode": "chat", "summary": "응, 말해봐."}
 
         result = server.build_api_response(
@@ -68,6 +69,36 @@ class UiServerTest(unittest.TestCase):
         self.assertEqual(result["response"]["mode"], "chat")
         self.assertEqual(calls["request_text"], "야")
         self.assertEqual(calls["history"], [{"role": "user", "content": "야"}])
+        self.assertEqual(calls["env"], {})
+
+    def test_general_chat_passes_model_overrides(self):
+        calls = {}
+
+        def fake_chat(request_text, history=None, env=None):
+            calls["env"] = env
+            return {"agent": "llm", "mode": "chat", "summary": "ok"}
+
+        result = server.build_api_response(
+            {
+                "request": "야",
+                "llm_model": "gpt-5.4-mini",
+                "llm_model_class": "spark",
+            },
+            agent_runner=lambda *_, **__: {},
+            chat_runner=fake_chat,
+        )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(calls["env"]["US_STOCK_AGENT_LLM_MODEL"], "gpt-5.4-mini")
+        self.assertEqual(calls["env"]["US_STOCK_AGENT_LLM_MODEL_CLASS"], "spark")
+
+    def test_rejects_invalid_llm_model_class(self):
+        with self.assertRaises(ValueError):
+            server.build_api_response(
+                {"request": "야", "llm_model_class": "expensive"},
+                agent_runner=lambda *_, **__: {},
+                chat_runner=lambda *_, **__: {},
+            )
 
     def test_stock_request_still_uses_stock_agent(self):
         calls = {}

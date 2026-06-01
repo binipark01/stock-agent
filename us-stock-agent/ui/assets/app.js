@@ -18,7 +18,8 @@ const TEMPLATES = [
 const state = {
   response: null,
   history: loadHistory(),
-  messages: []
+  messages: [],
+  modelSettings: loadModelSettings()
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -46,6 +47,41 @@ function saveHistory(item) {
   ].slice(0, 8);
   localStorage.setItem("us-stock-agent-history", JSON.stringify(state.history));
   renderHistory();
+}
+
+function loadModelSettings() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem("us-stock-agent-model-settings") || "{}");
+    const level = ["frontier", "standard", "spark"].includes(parsed.level) ? parsed.level : "frontier";
+    const model = typeof parsed.model === "string" ? parsed.model : "";
+    return { level, model };
+  } catch {
+    return { level: "frontier", model: "" };
+  }
+}
+
+function saveModelSettings() {
+  state.modelSettings = {
+    level: $("#modelLevel").value || "frontier",
+    model: $("#modelInput").value.trim()
+  };
+  localStorage.setItem("us-stock-agent-model-settings", JSON.stringify(state.modelSettings));
+  renderModelStatus();
+}
+
+function renderModelStatus(response = null) {
+  const model = response?.model || state.modelSettings.model || "OMX 기본값";
+  const level = state.modelSettings.level || "frontier";
+  $("#topMeta").textContent = response ? `${model} · ${level}` : `${level} · ${model}`;
+}
+
+function setupModelControls() {
+  $("#modelLevel").value = state.modelSettings.level;
+  $("#modelInput").value = state.modelSettings.model;
+  $("#modelLevel").addEventListener("change", saveModelSettings);
+  $("#modelInput").addEventListener("change", saveModelSettings);
+  $("#modelInput").addEventListener("blur", saveModelSettings);
+  renderModelStatus();
 }
 
 function renderPrompts() {
@@ -274,7 +310,7 @@ function renderResponse(response) {
   const answerText = buildNaturalAnswer(response);
   appendAgentResponse(answerText);
   state.messages.push({ role: "assistant", content: answerText });
-  $("#topMeta").textContent = "마지막 응답 완료";
+  renderModelStatus(response);
   renderStatus(response);
 }
 
@@ -299,7 +335,7 @@ async function loadHealth() {
       throw new Error(payload.error || "health check failed");
     }
     $("#agentStatus").textContent = "연결됨";
-    $("#topMeta").textContent = "자연어 질의 준비됨";
+    renderModelStatus();
     renderWatchlist(payload.watchlist || []);
   } catch (error) {
     $("#agentStatus").textContent = "연결 실패";
@@ -309,6 +345,7 @@ async function loadHealth() {
 
 async function runRequest(event) {
   event.preventDefault();
+  saveModelSettings();
   const command = {
     request: $("#requestInput").value.trim()
   };
@@ -329,7 +366,9 @@ async function runRequest(event) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...command,
-        history: state.messages.slice(-12)
+        history: state.messages.slice(-12),
+        llm_model: state.modelSettings.model,
+        llm_model_class: state.modelSettings.level
       })
     });
     const payload = await res.json();
@@ -364,6 +403,7 @@ function setupEvents() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  setupModelControls();
   renderPrompts();
   renderTemplates();
   renderHistory();

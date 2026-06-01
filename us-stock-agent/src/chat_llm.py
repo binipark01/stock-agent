@@ -293,7 +293,7 @@ def _resolve_omx_spark_model(env_map: Mapping[str, str]) -> tuple[str, str]:
 
 def resolve_omx_model(env: Mapping[str, str] | None = None, model_class: str | None = None) -> tuple[str, str]:
     env_map = _env(env)
-    lane = str(model_class or env_map.get("DISCORD_AGENT_LLM_MODEL_CLASS") or env_map.get("US_STOCK_AGENT_LLM_MODEL_CLASS") or "frontier").strip().lower()
+    lane = str(model_class or env_map.get("US_STOCK_AGENT_LLM_MODEL_CLASS") or env_map.get("DISCORD_AGENT_LLM_MODEL_CLASS") or "frontier").strip().lower()
     if lane in {"spark", "fast", "low", "low-complexity"}:
         return _resolve_omx_spark_model(env_map)
     if lane in {"standard", "std"}:
@@ -688,11 +688,12 @@ def call_llm(prompt: str, *, env: Mapping[str, str] | None = None, cwd: str | Pa
 def build_llm_chat_response(
     request_text: str,
     history: Any = None,
+    env: Mapping[str, str] | None = None,
     llm_func: Callable[..., LLMResult] = call_llm,
 ) -> dict[str, Any]:
-    settings = resolve_settings()
+    settings = resolve_settings(env)
     prompt = _build_chat_prompt(request_text, history)
-    result = llm_func(prompt, cwd=ROOT)
+    result = llm_func(prompt, cwd=ROOT, env=env)
     if not result.ok:
         text = f"LLM 호출에 실패했습니다: {result.error}"
         return _chat_response(text, settings=settings, result=result)

@@ -16,8 +16,9 @@ class ChatLlmTest(unittest.TestCase):
         self.assertFalse(should_use_llm_chat("나스닥 뭐 봐야 해?"))
 
     def test_chat_response_uses_llm_result(self):
-        def fake_llm(prompt, cwd=None):
+        def fake_llm(prompt, cwd=None, env=None):
             self.assertIn("user: 야", prompt)
+            self.assertIsNone(env)
             return LLMResult(ok=True, provider="codex", text="어, 말해봐.", command="codex exec", model="test-model")
 
         response = build_llm_chat_response("야", history=[{"role": "user", "content": "야"}], llm_func=fake_llm)
@@ -47,6 +48,29 @@ class ChatLlmTest(unittest.TestCase):
             self.assertEqual(settings.model, "from-codex-config")
             self.assertEqual(settings.model_provider, "cheapRouter")
             self.assertEqual(settings.reasoning_effort, "high")
+
+    def test_model_class_and_override_are_resolved_like_omx(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / ".omx-config.json").write_text(
+                '{"env":{"OMX_DEFAULT_FRONTIER_MODEL":"frontier-model","OMX_DEFAULT_STANDARD_MODEL":"standard-model"},'
+                '"models":{"team_low_complexity":"spark-model"}}',
+                encoding="utf-8",
+            )
+            base_env = {"CODEX_HOME": str(home)}
+
+            self.assertEqual(resolve_settings({**base_env, "US_STOCK_AGENT_LLM_MODEL_CLASS": "standard"}).model, "standard-model")
+            self.assertEqual(resolve_settings({**base_env, "US_STOCK_AGENT_LLM_MODEL_CLASS": "spark"}).model, "spark-model")
+            self.assertEqual(
+                resolve_settings(
+                    {
+                        **base_env,
+                        "US_STOCK_AGENT_LLM_MODEL_CLASS": "spark",
+                        "US_STOCK_AGENT_LLM_MODEL": "manual-model",
+                    }
+                ).model,
+                "manual-model",
+            )
 
 
 if __name__ == "__main__":
