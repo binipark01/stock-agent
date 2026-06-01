@@ -12,6 +12,10 @@ This repository currently focuses on:
 
 - [`stock-research-agent`](./stock-research-agent): US-stock-first research and alert agent.
 - [`stock-research-agent`](./stock-research-agent): 미국주식 중심 리서치/알림 에이전트.
+- [`market-terminal-agent`](./market-terminal-agent): Browser-based command-first market terminal prototype.
+- [`market-terminal-agent`](./market-terminal-agent): 명령어 중심 로컬 금융 터미널 프로토타입.
+- [`deepcode-agent`](./deepcode-agent): Hermes/orchestrator wrapper for HKUDS/DeepCode Paper2Code/Text2Web/Text2Backend.
+- [`deepcode-agent`](./deepcode-agent): HKUDS/DeepCode를 Hermes/orchestrator에서 호출하기 위한 래퍼.
 
 ## What it does / 주요 기능
 
@@ -201,3 +205,13 @@ Real environment files and runtime artifacts are intentionally ignored:
 Use example files such as `*.env.example` for documentation only.
 
 문서화에는 `*.env.example` 예시 파일만 사용합니다.
+
+## Stock agent split
+
+stock-research-agent is being split into dedicated specialists:
+
+- us-stock-agent for US market/sector/theme workflows.
+- kr-stock-agent for KRX/Kiwoom flow/theme workflows.
+- market-terminal-agent for browser-based command terminal workflows.
+
+orchestrator remains the central entrypoint and routes /us, /미장, /kr, /국장 explicitly.
