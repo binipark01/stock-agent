@@ -46,6 +46,8 @@ market-terminal-agent\scripts\krx_alerts\*.issue_candidates.json
 
 `.gitignore`에는 local server log, probe output, local bootstrap/binary, alert runtime marker를 추가했다. 서버 smoke와 probe 중 생기는 산출물이 source split에 섞이지 않게 하기 위함이다.
 
+또한 `market-terminal-agent`에는 terminal prototype 범위 밖의 legacy `stock-research-agent` 복사본이 남아 있을 수 있다. `config/`, `prompts/`, dashboard 외 `scripts/`, terminal에서 쓰지 않는 `src/`/`tests/` 하위 파일은 명시적으로 승격하기 전까지 Git 제외 상태로 둔다.
+
 ## stock-research-agent 삭제분
 
 현재 root status에는 기존 `stock-research-agent`가 삭제된 것으로 보인다. 이 삭제분은 `us-stock-agent`, `kr-stock-agent`, `market-terminal-agent` split이 의도한 최종 상태인지 확인한 뒤 별도 commit으로 다루는 편이 안전하다.

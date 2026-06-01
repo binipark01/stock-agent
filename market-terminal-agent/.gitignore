@@ -43,3 +43,24 @@ config/*password*.txt
 # Misrouted Windows path artifacts using private-use colon glyph
 C/
 C/**
+
+# Legacy stock-research split leftovers outside the terminal prototype
+config/
+prompts/
+docs/README.md
+docs/REFERENCE_REPOS.md
+docs/plans/
+docs/references/
+docs/tradingview-webhook.md
+scripts/*
+!scripts/stock_theme_dashboard.py
+src/*
+!src/us/
+src/us/*
+!src/us/agents/
+!src/us/agents/**
+src/us/agents/__pycache__/
+tests/*
+!tests/test_stock_theme_dashboard_server.py
+!tests/test_us_agent_framework.py
+tools/
