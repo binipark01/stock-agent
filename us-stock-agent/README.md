@@ -24,5 +24,5 @@ $env:US_STOCK_AGENT_LLM_PROVIDER="codex"
 
 The Codex/OMX provider reads model settings in this order: `OMX_DEFAULT_FRONTIER_MODEL`,
 `~/.codex/.omx-config.json`, then `~/.codex/config.toml`.
-The UI also lets you set a per-request model level (`frontier`, `standard`, `spark`) and optional model override.
+The UI also lets you set a per-request model and Codex reasoning effort (`low`, `medium`, `high`, `xhigh`).
 Stock requests such as `NVDA 체크해줘` still use the local stock agent.

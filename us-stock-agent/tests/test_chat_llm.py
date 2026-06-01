@@ -26,6 +26,7 @@ class ChatLlmTest(unittest.TestCase):
         self.assertEqual(response["mode"], "chat")
         self.assertEqual(response["summary"], "어, 말해봐.")
         self.assertIn("omx_codex", response["features"])
+        self.assertIn("reasoning_effort", response)
 
     def test_codex_settings_follow_omx_model_resolution(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -80,6 +81,22 @@ class ChatLlmTest(unittest.TestCase):
                 ).model,
                 "manual-model",
             )
+
+    def test_per_request_reasoning_effort_overrides_config(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            (home / "config.toml").write_text(
+                'model = "from-codex-config"\nmodel_reasoning_effort = "high"\n',
+                encoding="utf-8",
+            )
+            settings = resolve_settings(
+                {
+                    "CODEX_HOME": str(home),
+                    "US_STOCK_AGENT_LLM_REASONING_EFFORT": "low",
+                }
+            )
+
+            self.assertEqual(settings.reasoning_effort, "low")
 
 
 if __name__ == "__main__":

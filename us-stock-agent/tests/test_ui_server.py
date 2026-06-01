@@ -82,7 +82,7 @@ class UiServerTest(unittest.TestCase):
             {
                 "request": "야",
                 "llm_model": "gpt-5.4-mini",
-                "llm_model_class": "spark",
+                "llm_reasoning_effort": "high",
             },
             agent_runner=lambda *_, **__: {},
             chat_runner=fake_chat,
@@ -90,12 +90,12 @@ class UiServerTest(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertEqual(calls["env"]["US_STOCK_AGENT_LLM_MODEL"], "gpt-5.4-mini")
-        self.assertEqual(calls["env"]["US_STOCK_AGENT_LLM_MODEL_CLASS"], "spark")
+        self.assertEqual(calls["env"]["US_STOCK_AGENT_LLM_REASONING_EFFORT"], "high")
 
-    def test_rejects_invalid_llm_model_class(self):
+    def test_rejects_invalid_llm_reasoning_effort(self):
         with self.assertRaises(ValueError):
             server.build_api_response(
-                {"request": "야", "llm_model_class": "expensive"},
+                {"request": "야", "llm_reasoning_effort": "expensive"},
                 agent_runner=lambda *_, **__: {},
                 chat_runner=lambda *_, **__: {},
             )
