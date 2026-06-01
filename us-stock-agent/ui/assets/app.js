@@ -62,7 +62,7 @@ function loadModelSettings() {
 
 function saveModelSettings() {
   state.modelSettings = {
-    model: $("#modelInput").value.trim(),
+    model: $("#modelSelect").value,
     reasoning: $("#reasoningLevel").value || ""
   };
   localStorage.setItem("us-stock-agent-model-settings", JSON.stringify(state.modelSettings));
@@ -76,10 +76,14 @@ function renderModelStatus(response = null) {
 }
 
 function setupModelControls() {
-  $("#modelInput").value = state.modelSettings.model;
+  const modelSelect = $("#modelSelect");
+  const hasSavedModel = Array.from(modelSelect.options).some((option) => option.value === state.modelSettings.model);
+  if (!hasSavedModel) {
+    state.modelSettings.model = "";
+  }
+  modelSelect.value = state.modelSettings.model;
   $("#reasoningLevel").value = state.modelSettings.reasoning;
-  $("#modelInput").addEventListener("change", saveModelSettings);
-  $("#modelInput").addEventListener("blur", saveModelSettings);
+  modelSelect.addEventListener("change", saveModelSettings);
   $("#reasoningLevel").addEventListener("change", saveModelSettings);
   renderModelStatus();
 }

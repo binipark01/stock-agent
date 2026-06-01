@@ -33,13 +33,14 @@
         <div class="model-fields">
           <label class="field compact-field">
             <span>모델</span>
-            <input id="modelInput" name="modelInput" type="text" list="modelOptions" placeholder="OMX 기본 모델">
-            <datalist id="modelOptions">
-              <option value="gpt-5.5"></option>
-              <option value="gpt-5.4"></option>
-              <option value="gpt-5.4-mini"></option>
-              <option value="gpt-5.3-codex-spark"></option>
-            </datalist>
+            <select id="modelSelect" name="modelSelect">
+              <option value="">OMX 기본 모델</option>
+              <option value="gpt-5.5">gpt-5.5</option>
+              <option value="gpt-5.4">gpt-5.4</option>
+              <option value="gpt-5.4-mini">gpt-5.4-mini</option>
+              <option value="gpt-5.3-codex">gpt-5.3-codex</option>
+              <option value="gpt-5.3-codex-spark">gpt-5.3-codex-spark</option>
+            </select>
           </label>
           <label class="field compact-field">
             <span>추론 수준</span>
