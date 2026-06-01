@@ -10,6 +10,7 @@ data/kiwoom_token*.json
 data/toss_stock_codes.json
 
 # Local caches / runtime artifacts
+.venv/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -19,10 +20,15 @@ logs/
 $tmpJs
 .tmp_*.js
 scripts/*.err.txt
+scripts/krx_alerts/*.last.txt
+scripts/krx_alerts/*.issue_candidates.json
+data/probes/
 data/threads_profile_cache/
 data/threads_view_*.json
 data/threads_view_profiles/
 docs/references/threads-view-scan-*.md
+tools/cloudflared*
+tools/bootstrap/get-pip.py
 
 # Misrouted local probes / Windows cache paths
 hermes_probe.txt
