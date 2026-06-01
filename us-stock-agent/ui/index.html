@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>US Stock Agent</title>
+  <link rel="stylesheet" href="/assets/app.css">
+  <script defer src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+  <script defer src="/assets/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="agent-rail">
+      <div class="brand">
+        <div class="brand-mark"><i data-lucide="bot"></i></div>
+        <div>
+          <div class="brand-title">US Stock Agent</div>
+          <div class="brand-subtitle" id="agentStatus">연결 대기</div>
+        </div>
+      </div>
+
+      <section class="rail-block agent-profile">
+        <div class="section-label">Agent</div>
+        <div class="profile-row">
+          <span class="pulse"></span>
+          <span>명령 대기 중</span>
+        </div>
+        <div class="profile-meta" id="topMeta">준비 중</div>
+      </section>
+
+      <section class="rail-block model-card">
+        <div class="section-label">Model</div>
+        <div class="model-fields">
+          <label class="field compact-field">
+            <span>수준</span>
+            <select id="modelLevel" name="modelLevel">
+              <option value="frontier">Frontier</option>
+              <option value="standard">Standard</option>
+              <option value="spark">Spark</option>
+            </select>
+          </label>
+          <label class="field compact-field">
+            <span>모델</span>
+            <input id="modelInput" name="modelInput" type="text" placeholder="OMX 기본값">
+          </label>
+        </div>
+      </section>
+
+      <section class="rail-block">
+        <div class="section-label">빠른 질의</div>
+        <div class="quick-modes" id="quickModes"></div>
+      </section>
+
+      <section class="rail-block">
+        <div class="section-label">Watchlist</div>
+        <div class="chip-grid" id="watchlistChips"></div>
+      </section>
+
+      <section class="rail-block history-block">
+        <div class="section-label">최근 질의</div>
+        <div class="history-list" id="historyList"></div>
+      </section>
+    </aside>
+
+    <main class="command-main">
+      <header class="command-topbar">
+        <div>
+          <div class="kicker">Agent Chat</div>
+          <h1>US Stock Agent</h1>
+        </div>
+        <div class="top-actions">
+          <button class="icon-button" id="refreshButton" type="button" title="새로고침" aria-label="새로고침">
+            <i data-lucide="refresh-cw"></i>
+          </button>
+        </div>
+      </header>
+
+      <section class="session-grid">
+        <section class="thread-panel">
+          <div class="thread-head">
+            <div>
+              <div class="section-label">Conversation</div>
+              <h2>대화</h2>
+            </div>
+            <div class="thread-hint">대기 중</div>
+          </div>
+
+          <div class="transcript" id="conversation">
+            <article class="message assistant-message">
+              <div class="message-icon"><i data-lucide="sparkles"></i></div>
+              <div class="message-content">
+                <div class="message-meta">agent</div>
+                <div class="message-text">무엇을 볼까요?</div>
+              </div>
+            </article>
+          </div>
+
+          <form class="command-dock" id="requestForm">
+            <div class="command-input-row">
+              <label class="field command-field">
+                <span>질의</span>
+                <textarea id="requestInput" name="request" rows="3" placeholder="예: NVDA랑 TSLA 오늘 체크포인트 정리해줘"></textarea>
+              </label>
+              <div class="command-buttons">
+                <button class="primary-button" id="runButton" type="submit">
+                  <i data-lucide="send"></i>
+                  <span>보내기</span>
+                </button>
+                <button class="ghost-button" id="clearButton" type="button" title="초기화" aria-label="초기화">
+                  <i data-lucide="eraser"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="template-row" id="templateRow"></div>
+          </form>
+        </section>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

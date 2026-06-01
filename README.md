@@ -1,8 +1,8 @@
-# Stock Agent / 주식 투자 보조 에이전트
+# Stock Agent Workspace / 주식 투자 보조 에이전트 워크스페이스
 
-> A local-first stock research assistant for US-market watchlists, sector/theme strength, market briefings, filings, news, and Telegram/TradingView alert workflows.
+> Local-first stock agents split by market and workflow: US research/alerts, KRX/Kiwoom analysis, and a browser-based market terminal.
 >
-> 미국주식 중심의 워치리스트, 섹터/테마 강도, 시장 브리핑, 공시/뉴스, Telegram/TradingView 알림 워크플로우를 지원하는 로컬 우선 주식 리서치 보조 에이전트입니다.
+> 미국 주식 리서치/알림, KRX/Kiwoom 분석, 브라우저 기반 금융 터미널을 역할별로 나눈 로컬 우선 주식 에이전트 워크스페이스입니다.
 
 ## Project / 프로젝트
 
@@ -10,8 +10,14 @@ This repository currently focuses on:
 
 이 저장소의 핵심 프로젝트는 다음입니다:
 
-- [`stock-research-agent`](./stock-research-agent): US-stock-first research and alert agent.
-- [`stock-research-agent`](./stock-research-agent): 미국주식 중심 리서치/알림 에이전트.
+- [`us-stock-agent`](./us-stock-agent): US market, sector, theme, filing, social, and alert workflows.
+- [`us-stock-agent`](./us-stock-agent): 미국주식 시장/섹터/테마/공시/social/알림 에이전트.
+- [`kr-stock-agent`](https://github.com/binipark01/KR-Stock-Agent): KRX/Kiwoom flow, theme, and local analysis workflows. Local workspace path: `D:\Agents\kr-stock-agent`.
+- [`kr-stock-agent`](https://github.com/binipark01/KR-Stock-Agent): KRX/Kiwoom 수급/테마/로컬 분석 에이전트. 로컬 workspace 경로: `D:\Agents\kr-stock-agent`.
+- [`market-terminal-agent`](./market-terminal-agent): Browser-based command-first market terminal prototype.
+- [`market-terminal-agent`](./market-terminal-agent): 명령어 중심 로컬 금융 터미널 프로토타입.
+- [`deepcode-agent`](./deepcode-agent): Hermes/orchestrator wrapper for HKUDS/DeepCode Paper2Code/Text2Web/Text2Backend.
+- [`deepcode-agent`](./deepcode-agent): HKUDS/DeepCode를 Hermes/orchestrator에서 호출하기 위한 래퍼.
 
 ## What it does / 주요 기능
 
@@ -35,7 +41,7 @@ This repository currently focuses on:
 ## Quick start / 빠른 시작
 
 ```bash
-cd stock-research-agent
+cd us-stock-agent
 python3 -m pip install --user -r requirements.txt
 python3 src/main.py "NVDA랑 TSLA 오늘 체크포인트 정리해줘"
 ```
@@ -45,7 +51,7 @@ WSL path used in the local development environment:
 로컬 개발 환경에서 쓰는 WSL 경로:
 
 ```bash
-cd /mnt/d/Agents/stock-research-agent
+cd /mnt/d/Agents/us-stock-agent
 python3 src/main.py --mode brief "오늘 뭐 봐야 해?"
 python3 src/main.py --mode sector_strength "장중 섹터별 강한 섹터 약한 섹터 알려줘"
 python3 src/main.py --mode technical_snapshot "NVDA 차트 기술적 스냅샷 보여줘"
@@ -62,7 +68,7 @@ Clone the repository on the new machine:
 mkdir -p ~/Agents
 cd ~/Agents
 git clone https://github.com/binipark01/stock-agent.git
-cd stock-agent/stock-research-agent
+cd stock-agent/us-stock-agent
 python3 -m pip install --user -r requirements.txt
 python3 src/main.py --mode brief "오늘 뭐 봐야 해?"
 ```
@@ -75,7 +81,7 @@ D 드라이브를 쓰는 WSL 환경이면:
 mkdir -p /mnt/d/Agents
 cd /mnt/d/Agents
 git clone https://github.com/binipark01/stock-agent.git
-cd stock-agent/stock-research-agent
+cd stock-agent/us-stock-agent
 python3 -m pip install --user -r requirements.txt
 python3 src/main.py --mode sector_strength "장중 섹터별 강한 섹터 약한 섹터 알려줘"
 ```
@@ -87,7 +93,7 @@ Windows PowerShell에서는:
 ```powershell
 cd D:\Agents
 git clone https://github.com/binipark01/stock-agent.git
-cd stock-agent\stock-research-agent
+cd stock-agent\us-stock-agent
 python -m pip install -r requirements.txt
 python src\main.py --mode technical_snapshot "NVDA 차트 기술적 스냅샷 보여줘"
 ```
@@ -97,16 +103,18 @@ Tell Hermes on the new computer:
 새 컴퓨터의 Hermes에게 다음처럼 알려주면 됩니다:
 
 ```text
-Use the stock-research-agent at ~/Agents/stock-agent/stock-research-agent for stock requests.
-For WSL use /mnt/d/Agents/stock-agent/stock-research-agent if it exists.
+Use the us-stock-agent at ~/Agents/stock-agent/us-stock-agent for US stock requests.
+Use the kr-stock-agent at ~/Agents/stock-agent/kr-stock-agent for KRX/Kiwoom requests.
+For WSL use /mnt/d/Agents/stock-agent/us-stock-agent or /mnt/d/Agents/stock-agent/kr-stock-agent if they exist.
 Run brief requests with: python3 src/main.py --mode brief "<request>"
 Run sector requests with: python3 src/main.py --mode sector_strength "<request>"
 Run chart requests with: python3 src/main.py --mode technical_snapshot "<request>"
 ```
 
 ```text
-앞으로 주식 요청은 ~/Agents/stock-agent/stock-research-agent 에 있는 stock-research-agent를 우선 사용해.
-WSL에서 /mnt/d/Agents/stock-agent/stock-research-agent 가 있으면 그 경로를 사용해.
+앞으로 미장 요청은 ~/Agents/stock-agent/us-stock-agent 에 있는 us-stock-agent를 우선 사용해.
+국장/Kiwoom 요청은 ~/Agents/stock-agent/kr-stock-agent 에 있는 kr-stock-agent를 우선 사용해.
+WSL에서 /mnt/d/Agents/stock-agent/us-stock-agent 또는 /mnt/d/Agents/stock-agent/kr-stock-agent 가 있으면 그 경로를 사용해.
 브리핑: python3 src/main.py --mode brief "<요청>"
 섹터: python3 src/main.py --mode sector_strength "<요청>"
 차트: python3 src/main.py --mode technical_snapshot "<요청>"
@@ -138,7 +146,7 @@ cp config/tradingview_webhook.env.example config/tradingview_webhook.env
 ## Repository structure / 구조
 
 ```text
-stock-research-agent/
+us-stock-agent/
   src/
     main.py                  # CLI entrypoint and response orchestration
     request_modes.py         # Request-to-mode routing
@@ -153,12 +161,17 @@ stock-research-agent/
   tests/                     # unittest test suite
   config/                    # Example config and watchlists
   docs/                      # Notes and integration guides
+
+market-terminal-agent/
+  scripts/stock_theme_dashboard.py
+  tests/
+  docs/
 ```
 
 ## Testing / 테스트
 
 ```bash
-cd stock-research-agent
+cd us-stock-agent
 python3 -m py_compile src/main.py src/sector_strength.py src/yfinance_data.py scripts/run_sector_strength_alerts.py
 python3 -m unittest discover -s tests -p 'test_*.py'
 ```
@@ -201,3 +214,13 @@ Real environment files and runtime artifacts are intentionally ignored:
 Use example files such as `*.env.example` for documentation only.
 
 문서화에는 `*.env.example` 예시 파일만 사용합니다.
+
+## Stock agent split
+
+`stock-research-agent` has been split into dedicated specialists:
+
+- us-stock-agent for US market/sector/theme workflows.
+- kr-stock-agent for KRX/Kiwoom flow/theme workflows.
+- market-terminal-agent for browser-based command terminal workflows.
+
+orchestrator remains the central entrypoint and routes /us, /미장, /kr, /국장 explicitly.

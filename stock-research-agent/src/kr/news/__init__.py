@@ -1,1 +1,0 @@
-"""src.kr.news package."""

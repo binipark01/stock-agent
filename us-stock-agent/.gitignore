@@ -1,0 +1,52 @@
+# Local secrets / credentials
+.env
+*.env
+!.env.example
+!*.env.example
+config/kiwoom.env
+config/kiwoom.*.env
+config/private/
+data/kiwoom_token*.json
+data/toss_stock_codes.json
+
+# Local caches / runtime artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.test_touch
+.kiwoom_smoke_safe.json
+data/threads_profile_cache/
+data/threads_view_*.json
+data/threads_view_profiles/
+docs/references/threads-view-scan-*.md
+
+# Misrouted local probes / Windows cache paths
+hermes_probe.txt
+C:/
+C:/**
+data/*.db
+config/*appkey*.txt
+config/*secretkey*.txt
+config/*token*.txt
+config/*password*.txt
+
+# Misrouted Windows path artifacts using private-use colon glyph
+C/
+C/**
+
+# split-agent local state
+.env
+*.env
+!.env.example
+!*.env.example
+config/kiwoom.env
+config/*appkey*.txt
+config/*secretkey*.txt
+config/*token*.txt
+config/*password*.txt
+data/*.db
+data/*token*.json
+logs/
+__pycache__/
+*.py[cod]
+.pytest_cache/

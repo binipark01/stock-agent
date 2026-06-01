@@ -1,0 +1,66 @@
+# Local secrets / credentials
+.env
+*.env
+!.env.example
+!*.env.example
+config/kiwoom.env
+config/kiwoom.*.env
+config/private/
+data/kiwoom_token*.json
+data/toss_stock_codes.json
+
+# Local caches / runtime artifacts
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+logs/
+.test_touch
+.kiwoom_smoke_safe.json
+$tmpJs
+.tmp_*.js
+scripts/*.err.txt
+scripts/krx_alerts/*.last.txt
+scripts/krx_alerts/*.issue_candidates.json
+data/probes/
+data/threads_profile_cache/
+data/threads_view_*.json
+data/threads_view_profiles/
+docs/references/threads-view-scan-*.md
+tools/cloudflared*
+tools/bootstrap/get-pip.py
+
+# Misrouted local probes / Windows cache paths
+hermes_probe.txt
+C:/
+C:/**
+data/*.db
+config/*appkey*.txt
+config/*secretkey*.txt
+config/*token*.txt
+config/*password*.txt
+
+# Misrouted Windows path artifacts using private-use colon glyph
+C/
+C/**
+
+# Legacy stock-research split leftovers outside the terminal prototype
+config/
+prompts/
+docs/README.md
+docs/REFERENCE_REPOS.md
+docs/plans/
+docs/references/
+docs/tradingview-webhook.md
+scripts/*
+!scripts/stock_theme_dashboard.py
+src/*
+!src/us/
+src/us/*
+!src/us/agents/
+!src/us/agents/**
+src/us/agents/__pycache__/
+tests/*
+!tests/test_stock_theme_dashboard_server.py
+!tests/test_us_agent_framework.py
+tools/

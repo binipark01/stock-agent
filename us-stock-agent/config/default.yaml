@@ -1,0 +1,11 @@
+agent_name: us-stock-agent
+runtime: python
+entrypoint: src/main.py
+language: ko
+features:
+  market_agent: true
+  specialist: true
+paths:
+  prompts: prompts
+  data: data
+  logs: logs

@@ -1,0 +1,572 @@
+import contextlib
+import io
+import math
+import sys
+import types
+import unittest
+from unittest.mock import patch
+
+
+class _FakeSeries:
+    def __init__(self, values):
+        self._values = values
+
+    def dropna(self):
+        return self
+
+    def tolist(self):
+        return self._values
+
+
+class _FakeFrame:
+    def __init__(self, rows=None, columns=None):
+        self._rows = rows or []
+        self.columns = columns or []
+        self.empty = not bool(self._rows)
+
+    def head(self, limit):
+        return _FakeFrame(self._rows[:limit], columns=self.columns)
+
+    def reset_index(self):
+        return self
+
+    def to_dict(self, orient="records"):
+        if orient == "records":
+            return self._rows
+        return {idx: row for idx, row in enumerate(self._rows)}
+
+    def __getitem__(self, key):
+        return _FakeSeries([row.get(key) for row in self._rows])
+
+
+class _FakeOptionChain:
+    def __init__(self):
+        self.calls = _FakeFrame([
+            {"strike": 45.0, "openInterest": 1200, "volume": 300, "lastPrice": 3.1, "impliedVolatility": 0.8},
+            {"strike": 50.0, "openInterest": 2200, "volume": 500, "lastPrice": 1.4, "impliedVolatility": 0.9},
+        ])
+        self.puts = _FakeFrame([
+            {"strike": 40.0, "openInterest": 900, "volume": 450, "lastPrice": 1.2, "impliedVolatility": 0.85},
+            {"strike": 35.0, "openInterest": 300, "volume": 150, "lastPrice": 0.6, "impliedVolatility": 0.95},
+        ])
+
+
+class _FakeTicker:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.fast_info = {
+            "last_price": 44.25,
+            "previous_close": 42.5,
+            "market_cap": 123456789,
+            "currency": "USD",
+            "exchange": "NMS",
+        }
+        self.info = {
+            "longName": "Iris Energy Limited",
+            "sector": "Technology",
+            "industry": "Information Technology Services",
+            "marketCap": 123456789,
+            "trailingPE": 31.2,
+            "forwardPE": 22.4,
+            "beta": 2.1,
+            "shortPercentOfFloat": 0.18,
+        }
+        self.options = ("2026-05-15", "2026-06-19")
+        self.news = [
+            {"title": "IREN expands AI cloud", "publisher": "Yahoo Finance", "link": "https://example.com/iren", "providerPublishTime": 1770000000}
+        ]
+        self.calendar = {"Earnings Date": ["2026-05-07"], "Ex-Dividend Date": None}
+        self.actions = _FakeFrame([
+            {"Date": "2026-01-01", "Dividends": 0.0, "Stock Splits": 0.0},
+        ])
+        self.dividends = _FakeFrame([])
+        self.splits = _FakeFrame([])
+        self.major_holders = _FakeFrame([{"Breakdown": "insiders", "Value": "12%"}])
+        self.institutional_holders = _FakeFrame([{"Holder": "Big Fund", "Shares": 1000000}])
+        self.recommendations = _FakeFrame([{"period": "0m", "strongBuy": 3, "buy": 4, "hold": 2, "sell": 0, "strongSell": 0}])
+
+    def option_chain(self, expiration):
+        return _FakeOptionChain()
+
+
+class _FakeOptionChainWithNanVolume:
+    def __init__(self):
+        self.calls = _FakeFrame([
+            {"strike": 100.0, "openInterest": 10, "volume": math.nan, "lastPrice": 1.0, "impliedVolatility": 0.5},
+            {"strike": 105.0, "openInterest": 20, "volume": 7, "lastPrice": 0.5, "impliedVolatility": 0.6},
+        ])
+        self.puts = _FakeFrame([
+            {"strike": 95.0, "openInterest": 5, "volume": math.nan, "lastPrice": 0.8, "impliedVolatility": 0.7},
+        ])
+
+
+class _FakeTickerWithFragileProperties(_FakeTicker):
+    def option_chain(self, expiration):
+        return _FakeOptionChainWithNanVolume()
+
+    @property
+    def earnings_dates(self):
+        raise ImportError("lxml missing")
+
+    @property
+    def insider_transactions(self):
+        raise RuntimeError("holder endpoint flaky")
+
+
+class _FakeFastInfoMapping:
+    def __init__(self, noisy: bool = False):
+        self.noisy = noisy
+        self._values = {
+            "lastPrice": 502.5,
+            "previousClose": 500.0,
+            "currency": "USD",
+            "exchange": "PCX",
+        }
+
+    def get(self, key, default=None):
+        if self.noisy:
+            print(f"${key}: possibly delisted; no price data found", file=sys.stderr)
+        return self._values.get(key, default)
+
+    def keys(self):
+        return self._values.keys()
+
+
+class _FakeQuoteOnlyTicker:
+    def __init__(self, symbol):
+        self.symbol = symbol
+        self.fast_info = {
+            "last_price": 501.25,
+            "previous_close": 500.0,
+            "currency": "USD",
+            "exchange": "PCX",
+        }
+
+
+    @property
+    def info(self):
+        raise AssertionError("quote-only fetch must not touch info/fundamentals")
+
+    @property
+    def earnings_dates(self):
+        raise AssertionError("quote-only fetch must not touch earnings_dates")
+
+    @property
+    def news(self):
+        raise AssertionError("quote-only fetch must not touch news")
+
+
+class YfinanceDataTest(unittest.TestCase):
+    def test_market_pack_collects_quote_options_fundamentals_news_calendar_and_holders(self):
+        fake_yfinance = types.SimpleNamespace(Ticker=_FakeTicker)
+        with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+            from src.yfinance_data import build_yfinance_focus_lines, fetch_yfinance_market_pack
+
+            pack = fetch_yfinance_market_pack("IREN")
+            lines = build_yfinance_focus_lines(pack)
+
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["symbol"], "IREN")
+        self.assertEqual(pack["quote"]["price"], 44.25)
+        self.assertEqual(pack["fundamentals"]["long_name"], "Iris Energy Limited")
+        self.assertEqual(pack["fundamentals"]["sector"], "Technology")
+        self.assertEqual(pack["options"]["nearest_expiration"], "2026-05-15")
+        self.assertEqual(pack["options"]["call_open_interest"], 3400)
+        self.assertEqual(pack["options"]["put_volume"], 600)
+        self.assertAlmostEqual(pack["options"]["put_call_volume_ratio"], 0.75)
+        self.assertEqual(pack["options"]["top_call_strikes_by_oi"][0]["strike"], 50.0)
+        self.assertEqual(pack["news"][0]["title"], "IREN expands AI cloud")
+        self.assertIn("Earnings Date", pack["calendar"])
+        self.assertEqual(pack["holders"]["institutional_holders"][0]["Holder"], "Big Fund")
+        self.assertIn("YF Quote: IREN 44.25", lines[0])
+        self.assertTrue(any("YF Options" in line and "P/C vol 0.75" in line for line in lines))
+        self.assertTrue(any("YF Fundamentals" in line and "Technology" in line for line in lines))
+        self.assertTrue(any("YF News" in line and "IREN expands AI cloud" in line for line in lines))
+
+    def test_market_pack_is_safe_when_yfinance_is_missing(self):
+        with patch.dict(sys.modules, {"yfinance": None}):
+            from src.yfinance_data import build_yfinance_focus_lines, fetch_yfinance_market_pack
+
+            pack = fetch_yfinance_market_pack("BMNR")
+            lines = build_yfinance_focus_lines(pack)
+
+        self.assertFalse(pack["available"])
+        self.assertEqual(pack["source"], "yfinance_missing")
+        self.assertEqual(lines, ["YF Pack: BMNR / yfinance 미설치 또는 호출 불가"])
+
+    def test_market_pack_tolerates_nan_option_volume_and_flaky_yfinance_properties(self):
+        fake_yfinance = types.SimpleNamespace(Ticker=_FakeTickerWithFragileProperties)
+        with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+            from src.yfinance_data import fetch_yfinance_market_pack
+
+            pack = fetch_yfinance_market_pack("NVDA")
+
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["options"]["call_open_interest"], 30)
+        self.assertEqual(pack["options"]["call_volume"], 7)
+        self.assertEqual(pack["options"]["put_volume"], 0)
+        self.assertEqual(pack["earnings_dates"], [])
+        self.assertTrue(any("earnings_dates unavailable" in warning for warning in pack["warnings"]))
+        self.assertTrue(any("insider_transactions unavailable" in warning for warning in pack["warnings"]))
+
+    def test_yahoo_chart_quote_pack_uses_premarket_last_against_regular_close(self):
+        import json
+        from unittest.mock import Mock
+
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 64.98,
+                            "chartPreviousClose": 76.46,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + 16 * 60, 60)),
+                        "indicators": {"quote": [{"close": [64.8, 64.9, 65.0, 65.1, 65.2, 65.3, 65.4, 65.5, 65.6, 65.7, 65.8, 65.9, 66.0, 66.02, 66.05, 66.1], "volume": [100] * 16}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("OKLO")
+
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["source"], "yahoo_chart_quote")
+        self.assertEqual(pack["quote"]["price"], 66.1)
+        self.assertEqual(pack["quote"]["previous_close"], 64.98)
+        self.assertEqual(pack["quote"]["pct_change"], 1.72)
+        self.assertEqual(pack["quote"]["regular_market_price"], 64.98)
+        self.assertEqual(pack["quote"]["chart_previous_close"], 76.46)
+        self.assertEqual(pack["quote"]["volume"], 1600)
+        self.assertEqual(pack["quote"]["trading_value"], 104837.0)
+        self.assertEqual(pack["quote"]["pct_change_1m"], 0.08)
+        self.assertEqual(pack["quote"]["pct_change_5m"], 0.46)
+        self.assertEqual(pack["quote"]["pct_change_15m"], 2.01)
+
+    def test_toss_wts_quote_pack_uses_day_market_price_and_base_change(self):
+        import json
+        from unittest.mock import Mock
+
+        payload = {
+            "result": [
+                {"productCode": "US20210825002", "close": 27.2, "base": 26.5, "session": "DAY_MARKET", "volume": 1234}
+            ]
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_toss_wts_quote_packs
+
+            packs = fetch_toss_wts_quote_packs(["RKLB"])
+
+        self.assertTrue(packs["RKLB"]["available"])
+        self.assertEqual(packs["RKLB"]["source"], "toss_wts_stock_prices")
+        self.assertEqual(packs["RKLB"]["quote"]["price"], 27.2)
+        self.assertEqual(packs["RKLB"]["quote"]["previous_close"], 26.5)
+        self.assertEqual(packs["RKLB"]["quote"]["pct_change"], 2.64)
+        self.assertEqual(packs["RKLB"]["quote"]["session_label"], "토스 데이마켓/주간거래")
+        self.assertEqual(packs["RKLB"]["quote"]["pct_change_basis"], "Toss base 대비")
+        self.assertFalse(packs["RKLB"]["quote"]["is_stale_regular_close"])
+
+    def test_yahoo_chart_quote_pack_uses_previous_close_during_regular_session(self):
+        import json
+        from unittest.mock import Mock
+
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NMS",
+                            "marketState": "REGULAR",
+                            "regularMarketPrice": 208.34,
+                            "previousClose": 196.66,
+                            "chartPreviousClose": 196.66,
+                            "regularMarketTime": 1777558200,
+                            "currentTradingPeriod": {
+                                "regular": {"start": 1777555800, "end": 1777579200},
+                                "pre": {"start": 1777541400, "end": 1777555800},
+                                "post": {"start": 1777579200, "end": 1777593600},
+                            },
+                        },
+                        "timestamp": [1777471680, 1777471740, 1777558080, 1777558140, 1777558200],
+                        "indicators": {"quote": [{"close": [196.0, 197.0, 207.8, 208.1, 208.34], "volume": [1000, 2000, 100, 200, 300]}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("NVDA")
+
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["quote"]["price"], 208.34)
+        self.assertEqual(pack["quote"]["previous_close"], 196.66)
+        self.assertEqual(pack["quote"]["pct_change"], 5.94)
+        self.assertEqual(pack["quote"]["regular_market_price"], 208.34)
+        self.assertEqual(pack["quote"]["volume"], 600)
+        self.assertEqual(pack["quote"]["day_volume"], 600)
+        self.assertEqual(pack["quote"]["previous_volume"], 3000)
+        self.assertEqual(pack["quote"]["volume_vs_previous_pct"], -80.0)
+        self.assertEqual(pack["quote"]["trading_value"], 124902.0)
+        self.assertEqual(pack["quote"]["vwap"], 208.17)
+        self.assertEqual(pack["quote"]["vwap_position_pct"], 0.08)
+
+    def test_yahoo_chart_quote_pack_adds_intraday_rsi_and_bollinger_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [float(value) for value in range(100, 121)]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["rsi14"], 100.0)
+        self.assertEqual(quote["bollinger_mid"], 110.5)
+        self.assertEqual(quote["bollinger_upper"], 122.03)
+        self.assertEqual(quote["bollinger_lower"], 98.97)
+        self.assertEqual(quote["bollinger_position_pct"], 91.2)
+        self.assertEqual(quote["bollinger_state"], "상단권")
+
+    def test_yahoo_chart_quote_pack_adds_intraday_ichimoku_cloud_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [float(value) for value in range(100, 152)]
+        highs = [value + 1.0 for value in closes]
+        lows = [value - 1.0 for value in closes]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "high": highs, "low": lows, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["ichimoku_conversion"], 147.0)
+        self.assertEqual(quote["ichimoku_base"], 138.5)
+        self.assertEqual(quote["ichimoku_span_a"], 142.75)
+        self.assertEqual(quote["ichimoku_span_b"], 125.5)
+        self.assertEqual(quote["ichimoku_cloud_top"], 142.75)
+        self.assertEqual(quote["ichimoku_cloud_bottom"], 125.5)
+        self.assertEqual(quote["ichimoku_cloud_state"], "구름 위")
+
+    def test_yahoo_chart_quote_pack_adds_intraday_macd_and_stochastic_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [round(100 + idx + (0.02 * idx * idx), 2) for idx in range(60)]
+        highs = [value + 1.0 for value in closes]
+        lows = [value - 1.0 for value in closes]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "high": highs, "low": lows, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["macd_line"], 18.5)
+        self.assertEqual(quote["macd_signal"], 17.46)
+        self.assertEqual(quote["macd_histogram"], 1.04)
+        self.assertEqual(quote["macd_histogram_prev"], 1.04)
+        self.assertEqual(quote["macd_histogram_delta"], 0.01)
+        self.assertEqual(quote["macd_state"], "상방")
+        self.assertEqual(quote["stochastic_k"], 97.6)
+        self.assertEqual(quote["stochastic_d"], 97.6)
+        self.assertEqual(quote["stochastic_k_delta"], 0.0)
+        self.assertEqual(quote["stochastic_d_delta"], 0.0)
+        self.assertEqual(quote["stochastic_state"], "과열")
+        self.assertEqual(quote["rsi14"], 100.0)
+        self.assertEqual(quote["rsi14_delta"], 0.0)
+        self.assertEqual(quote["bollinger_bandwidth_pct"], 34.5)
+        self.assertEqual(quote["bollinger_bandwidth_delta"], -0.1)
+
+    def test_yahoo_chart_quote_pack_uses_slow_stochastic_snapshot(self):
+        import json
+        from unittest.mock import Mock
+
+        closes = [100, 102, 101, 103, 105, 104, 106, 108, 107, 109, 111, 110, 112, 114, 113, 115, 107, 116, 108, 117]
+        highs = [value + 1.0 for value in closes]
+        lows = [value - 1.0 for value in closes]
+        payload = {
+            "chart": {
+                "result": [
+                    {
+                        "meta": {
+                            "currency": "USD",
+                            "exchangeName": "NYQ",
+                            "regularMarketPrice": 100.0,
+                            "chartPreviousClose": 100.0,
+                            "regularMarketTime": 1777492802,
+                        },
+                        "timestamp": list(range(1777550800, 1777550800 + len(closes) * 60, 60)),
+                        "indicators": {"quote": [{"close": closes, "high": highs, "low": lows, "volume": [100] * len(closes)}]},
+                    }
+                ],
+                "error": None,
+            }
+        }
+        response = Mock()
+        response.read.return_value = json.dumps(payload).encode("utf-8")
+        response.__enter__ = Mock(return_value=response)
+        response.__exit__ = Mock(return_value=False)
+
+        with patch("urllib.request.urlopen", return_value=response):
+            from src.yfinance_data import fetch_yahoo_chart_quote_pack
+
+            pack = fetch_yahoo_chart_quote_pack("RKLB")
+
+        self.assertTrue(pack["available"])
+        quote = pack["quote"]
+        self.assertEqual(quote["stochastic_k"], 73.6)
+        self.assertEqual(quote["stochastic_d"], 67.5)
+        self.assertEqual(quote["stochastic_k_delta"], 18.9)
+        self.assertEqual(quote["stochastic_d_delta"], 0.5)
+        self.assertEqual(quote["stochastic_state"], "중립")
+
+    def test_quote_pack_uses_only_fast_quote_fields_for_intraday_alerts(self):
+        fake_yfinance = types.SimpleNamespace(Ticker=_FakeQuoteOnlyTicker)
+        with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+            from src.yfinance_data import fetch_yfinance_quote_pack
+
+            pack = fetch_yfinance_quote_pack("SPY")
+
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["source"], "yfinance_quote")
+        self.assertEqual(pack["quote"]["price"], 501.25)
+        self.assertEqual(pack["quote"]["previous_close"], 500.0)
+        self.assertEqual(pack["quote"]["pct_change"], 0.25)
+        self.assertEqual(pack["quote"]["exchange"], "PCX")
+
+    def test_quote_pack_reads_yfinance_fast_info_mapping_objects(self):
+        class _MappingQuoteTicker(_FakeQuoteOnlyTicker):
+            def __init__(self, symbol):
+                self.symbol = symbol
+                self.fast_info = _FakeFastInfoMapping()
+
+        fake_yfinance = types.SimpleNamespace(Ticker=_MappingQuoteTicker)
+        with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+            from src.yfinance_data import fetch_yfinance_quote_pack
+
+            pack = fetch_yfinance_quote_pack("SPY")
+
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["quote"]["price"], 502.5)
+        self.assertEqual(pack["quote"]["previous_close"], 500.0)
+        self.assertEqual(pack["quote"]["pct_change"], 0.5)
+        self.assertEqual(pack["quote"]["exchange"], "PCX")
+
+    def test_quote_pack_suppresses_yfinance_fast_info_stderr_noise(self):
+        class _NoisyMappingQuoteTicker(_FakeQuoteOnlyTicker):
+            def __init__(self, symbol):
+                self.symbol = symbol
+                self.fast_info = _FakeFastInfoMapping(noisy=True)
+
+        fake_yfinance = types.SimpleNamespace(Ticker=_NoisyMappingQuoteTicker)
+        stderr = io.StringIO()
+        with patch.dict(sys.modules, {"yfinance": fake_yfinance}), contextlib.redirect_stderr(stderr):
+            from src.yfinance_data import fetch_yfinance_quote_pack
+
+            pack = fetch_yfinance_quote_pack("VOY")
+
+        self.assertEqual(stderr.getvalue(), "")
+        self.assertTrue(pack["available"])
+        self.assertEqual(pack["quote"]["price"], 502.5)
+        self.assertTrue(any("possibly delisted" in warning for warning in pack["warnings"]))
+
+
+if __name__ == "__main__":
+    unittest.main()
